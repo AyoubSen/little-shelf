@@ -26,7 +26,6 @@ import {
 	energyMap,
 	type MoodTag,
 	moodTags,
-	seedBooks,
 	statusLabels,
 } from "./bookData";
 
@@ -1436,14 +1435,14 @@ function ThemeChooser({
 }
 
 function loadBooks() {
-	if (typeof window === "undefined") return seedBooks;
+	if (typeof window === "undefined") return [];
 	const stored = window.localStorage.getItem(storageKey);
-	if (!stored) return seedBooks;
+	if (!stored) return [];
 	try {
 		const parsed = JSON.parse(stored) as Book[];
-		return parsed.length ? parsed : seedBooks;
+		return parsed;
 	} catch {
-		return seedBooks;
+		return [];
 	}
 }
 

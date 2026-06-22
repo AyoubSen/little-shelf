@@ -51,7 +51,7 @@ Current primary flows:
 - Pick a recommendation from `want` or `paused` books.
 - Add/edit reflection fields for finished books.
 - Persist books to `localStorage`.
-- Seed sample books when empty.
+- Start empty when there is no saved local data.
 
 ## Data Model
 
