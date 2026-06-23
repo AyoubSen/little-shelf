@@ -36,6 +36,7 @@ const tabs = ["Now", "Shelf", "Pick", "Journal"] as const;
 type Tab = (typeof tabs)[number];
 const themes = ["paper", "moss", "plum", "night"] as const;
 type ThemeName = (typeof themes)[number];
+type ShelfFilter = "all" | BookStatus;
 
 type BookDraft = {
 	title: string;
@@ -101,9 +102,11 @@ export function LittleShelfApp() {
 	const [energy, setEnergy] = useState(energyLabels[0]);
 	const [pickIndex, setPickIndex] = useState(0);
 	const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
+	const [toast, setToast] = useState("");
 	const [focusedReadingId, setFocusedReadingId] = useState<string | null>(() =>
 		loadFocusedReadingId(),
 	);
+	const toastTimerRef = useRef<number | null>(null);
 
 	useEffect(() => {
 		window.localStorage.setItem(storageKey, JSON.stringify(books));
@@ -145,6 +148,14 @@ export function LittleShelfApp() {
 	const pickedBook = picks[pickIndex % Math.max(picks.length, 1)];
 	const isEditing = editingId !== null;
 
+	function notify(message: string) {
+		setToast(message);
+		if (toastTimerRef.current) {
+			window.clearTimeout(toastTimerRef.current);
+		}
+		toastTimerRef.current = window.setTimeout(() => setToast(""), 2200);
+	}
+
 	function openAddBook() {
 		setActiveTab("Shelf");
 		setDraft(blankDraft);
@@ -160,6 +171,7 @@ export function LittleShelfApp() {
 
 	function saveDraft() {
 		if (!draft.title.trim() || !draft.author.trim()) return;
+		const wasEditing = editingId !== null;
 		const totalPages = Number(draft.totalPages) || 0;
 		const currentPage = Number(draft.currentPage) || 0;
 		const progress =
@@ -216,6 +228,7 @@ export function LittleShelfApp() {
 		setDraft(blankDraft);
 		setEditingId(null);
 		setIsBookSheetOpen(false);
+		notify(wasEditing ? "Book updated" : "Book added");
 	}
 
 	function editBook(book: Book) {
@@ -241,6 +254,7 @@ export function LittleShelfApp() {
 	}
 
 	function changeStatus(book: Book, status: BookStatus) {
+		if (book.status === status) return;
 		updateBook(book.id, {
 			status,
 			startedAt:
@@ -256,6 +270,7 @@ export function LittleShelfApp() {
 		if (status === "finished") {
 			setFinishingBookId(book.id);
 		}
+		notify(`Moved to ${statusLabels[status]}`);
 	}
 
 	const finishingBook = books.find((book) => book.id === finishingBookId);
@@ -285,7 +300,9 @@ export function LittleShelfApp() {
 
 			{activeTab === "Now" && (
 				<NowScreen
+					hasAnyBooks={books.length > 0}
 					books={orderedReadingBooks}
+					onAdd={openAddBook}
 					onFocus={setFocusedReadingId}
 					onPick={() => setActiveTab("Pick")}
 					onUpdate={updateBook}
@@ -299,6 +316,7 @@ export function LittleShelfApp() {
 						setBooks((current) => current.filter((book) => book.id !== id))
 					}
 					onEdit={editBook}
+					onNotify={notify}
 					onOpenAdd={openAddBook}
 				/>
 			)}
@@ -306,6 +324,8 @@ export function LittleShelfApp() {
 				<PickScreen
 					book={pickedBook}
 					energy={energy}
+					hasAnyBooks={books.length > 0}
+					onAdd={openAddBook}
 					onEnergy={(value) => {
 						setEnergy(value);
 						setPickIndex(0);
@@ -314,7 +334,13 @@ export function LittleShelfApp() {
 				/>
 			)}
 			{activeTab === "Journal" && (
-				<JournalScreen books={finishedBooks} onUpdate={updateBook} />
+				<JournalScreen
+					books={finishedBooks}
+					hasAnyBooks={books.length > 0}
+					onAdd={openAddBook}
+					onNotify={notify}
+					onUpdate={updateBook}
+				/>
 			)}
 
 			<nav className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--theme-line)] bg-cream/90 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2 shadow-[0_-14px_30px_var(--theme-shadow)] backdrop-blur lg:left-1/2 lg:w-[28rem] lg:-translate-x-1/2 lg:rounded-t-3xl lg:border-x">
@@ -346,26 +372,47 @@ export function LittleShelfApp() {
 			{finishingBook && (
 				<FinishReflectionSheet
 					book={finishingBook}
-					onClose={() => setFinishingBookId(null)}
+					onClose={(saved) => {
+						setFinishingBookId(null);
+						if (saved) notify("Memory saved");
+					}}
 					onUpdate={updateBook}
 				/>
 			)}
+
+			<AppToast message={toast} />
 		</main>
 	);
 }
 
 function NowScreen({
+	hasAnyBooks,
 	books,
+	onAdd,
 	onFocus,
 	onPick,
 	onUpdate,
 }: {
+	hasAnyBooks: boolean;
 	books: Book[];
+	onAdd: () => void;
 	onFocus: (bookId: string) => void;
 	onPick: () => void;
 	onUpdate: (id: string, updates: Partial<Book>) => void;
 }) {
 	if (books.length === 0) {
+		if (!hasAnyBooks) {
+			return (
+				<EmptyState
+					actionLabel="Add your first book"
+					description="Start with one book you are reading, want to read, or keep thinking about. Little Shelf gets useful once it has a few real titles from your life."
+					eyebrow="Blank shelf"
+					onAction={onAdd}
+					title="Begin with one book."
+				/>
+			);
+		}
+
 		return (
 			<section className="surface page-marker p-6 pl-7">
 				<p className="mb-3 text-sm font-bold text-sage">
@@ -565,9 +612,26 @@ function ShelfScreen(props: {
 	onChangeStatus: (book: Book, status: BookStatus) => void;
 	onDelete: (id: string) => void;
 	onEdit: (book: Book) => void;
+	onNotify: (message: string) => void;
 	onOpenAdd: () => void;
 }) {
+	const [query, setQuery] = useState("");
+	const [filter, setFilter] = useState<ShelfFilter>("all");
 	const sections = ["reading", "want", "finished", "paused"] as BookStatus[];
+	const normalizedQuery = query.trim().toLowerCase();
+	const isFiltered = normalizedQuery.length > 0 || filter !== "all";
+	const filteredBooks = props.books.filter((book) => {
+		const matchesQuery = normalizedQuery
+			? `${book.title} ${book.author}`.toLowerCase().includes(normalizedQuery)
+			: true;
+		const matchesStatus = filter === "all" ? true : book.status === filter;
+		return matchesQuery && matchesStatus;
+	});
+
+	function deleteBook(id: string) {
+		props.onDelete(id);
+		props.onNotify("Book deleted");
+	}
 
 	return (
 		<section className="space-y-7">
@@ -592,44 +656,130 @@ function ShelfScreen(props: {
 					<Plus className="mr-1 inline size-4" /> Add book
 				</button>
 			</div>
-			{sections.map((status) => {
-				const books = props.books.filter((book) => book.status === status);
 
-				return (
-					<section className="space-y-3" key={status}>
-						<div className="flex items-end justify-between gap-3 border-b border-[var(--theme-line)] pb-2">
-							<div>
-								<p className="text-[0.68rem] font-bold uppercase tracking-[0.22em] text-muted">
-									{statusHint(status)}
-								</p>
-								<h2 className="font-serif text-2xl leading-none text-ink">
-									{statusLabels[status]}
-								</h2>
+			{props.books.length === 0 ? (
+				<EmptyState
+					actionLabel="Add a book"
+					description="Search Open Library or add one manually. You can decide later whether it belongs in Reading, Want, Finished, or Paused."
+					eyebrow="No books yet"
+					onAction={props.onOpenAdd}
+					title="Your shelf is waiting for its first spine."
+				/>
+			) : (
+				<>
+					<div className="surface p-4">
+						<label className="grid gap-2 text-sm font-bold text-ink">
+							Find a book
+							<div className="flex min-h-12 items-center gap-2 rounded-2xl border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] px-3 focus-within:ring-3 focus-within:ring-[var(--theme-accent-soft)]">
+								<Search className="size-4 text-muted" />
+								<input
+									className="min-w-0 flex-1 bg-transparent text-sm font-medium text-ink outline-none placeholder:text-muted"
+									placeholder="Search title or author"
+									value={query}
+									onChange={(event) => setQuery(event.target.value)}
+								/>
 							</div>
-							<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-1 text-xs font-bold text-sage">
-								{books.length}
-							</span>
+						</label>
+						<div className="mt-3 flex flex-wrap gap-2">
+							{(["all", ...sections] as ShelfFilter[]).map((item) => (
+								<button
+									className={`tap rounded-full px-3.5 py-2 text-sm font-bold ${filter === item ? "bg-sage text-paper" : "border border-[var(--theme-line)] text-muted"}`}
+									key={item}
+									onClick={() => setFilter(item)}
+									type="button"
+								>
+									{item === "all" ? "All" : statusLabels[item]}
+								</button>
+							))}
 						</div>
-						{books.length > 0 ? (
-							<div className="grid gap-3 lg:grid-cols-2">
-								{books.map((book) => (
-									<BookCard
-										book={book}
-										key={book.id}
-										onChangeStatus={props.onChangeStatus}
-										onDelete={props.onDelete}
-										onEdit={props.onEdit}
-									/>
-								))}
+					</div>
+
+					{isFiltered ? (
+						<section className="space-y-3">
+							<div className="flex items-end justify-between gap-3 border-b border-[var(--theme-line)] pb-3">
+								<div>
+									<p className="text-[0.68rem] font-bold uppercase tracking-[0.22em] text-muted">
+										Filtered shelf
+									</p>
+									<h2 className="mt-1.5 font-serif text-2xl leading-none text-ink">
+										{filteredBooks.length}{" "}
+										{filteredBooks.length === 1 ? "match" : "matches"}
+									</h2>
+								</div>
+								<button
+									className="tap rounded-full px-3 py-2 text-xs font-bold text-sage"
+									onClick={() => {
+										setQuery("");
+										setFilter("all");
+									}}
+									type="button"
+								>
+									Clear
+								</button>
 							</div>
-						) : (
-							<p className="rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-5 text-sm text-muted">
-								{emptyStatusCopy(status)}
-							</p>
-						)}
-					</section>
-				);
-			})}
+							{filteredBooks.length > 0 ? (
+								<div className="grid gap-3 lg:grid-cols-2">
+									{filteredBooks.map((book) => (
+										<BookCard
+											book={book}
+											key={book.id}
+											onChangeStatus={props.onChangeStatus}
+											onDelete={deleteBook}
+											onEdit={props.onEdit}
+										/>
+									))}
+								</div>
+							) : (
+								<p className="rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-5 text-sm text-muted">
+									No books match that search. Try a title, author, or another
+									status.
+								</p>
+							)}
+						</section>
+					) : (
+						sections.map((status) => {
+							const books = props.books.filter(
+								(book) => book.status === status,
+							);
+
+							return (
+								<section className="space-y-3" key={status}>
+									<div className="flex items-end justify-between gap-3 border-b border-[var(--theme-line)] pb-3">
+										<div>
+											<p className="text-[0.68rem] font-bold uppercase tracking-[0.22em] text-muted">
+												{statusHint(status)}
+											</p>
+											<h2 className="mt-1.5 font-serif text-2xl leading-none text-ink">
+												{statusLabels[status]}
+											</h2>
+										</div>
+										<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-1 text-xs font-bold text-sage">
+											{books.length}
+										</span>
+									</div>
+									{books.length > 0 ? (
+										<div className="grid gap-3 lg:grid-cols-2">
+											{books.map((book) => (
+												<BookCard
+													book={book}
+													key={book.id}
+													onChangeStatus={props.onChangeStatus}
+													onDelete={deleteBook}
+													onEdit={props.onEdit}
+												/>
+											))}
+										</div>
+									) : (
+										<p className="rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-5 text-sm text-muted">
+											{emptyStatusCopy(status)}
+										</p>
+									)}
+								</section>
+							);
+						})
+					)}
+				</>
+			)}
 		</section>
 	);
 }
@@ -651,6 +801,7 @@ function BookSheet({
 	const [results, setResults] = useState<OpenLibraryResult[]>([]);
 	const [isSearching, setIsSearching] = useState(false);
 	const [pageLookupKey, setPageLookupKey] = useState<string | null>(null);
+	const [selectedResultTitle, setSelectedResultTitle] = useState("");
 	const [searchError, setSearchError] = useState("");
 	const pageLookupKeyRef = useRef<string | null>(null);
 	const detailsRef = useRef<HTMLDivElement | null>(null);
@@ -663,6 +814,7 @@ function BookSheet({
 
 		setIsSearching(true);
 		setSearchError("");
+		setSelectedResultTitle("");
 
 		try {
 			const nextResults = await searchOpenLibrary(trimmedQuery);
@@ -682,6 +834,7 @@ function BookSheet({
 	async function applyResult(result: OpenLibraryResult) {
 		pageLookupKeyRef.current = result.key;
 		setPageLookupKey(result.key);
+		setSelectedResultTitle(result.title);
 
 		onChangeDraft((currentDraft) => ({
 			...currentDraft,
@@ -793,6 +946,12 @@ function BookSheet({
 					</div>
 					{searchError && (
 						<p className="mt-2 text-xs font-bold text-muted">{searchError}</p>
+					)}
+					{selectedResultTitle && (
+						<p className="mt-2 rounded-xl bg-[var(--theme-accent-soft)] px-3 py-2 text-xs font-bold text-sage">
+							Selected from Open Library: {selectedResultTitle}. Review the
+							details below.
+						</p>
 					)}
 					{results.length > 0 && (
 						<div className="mt-3 grid gap-2">
@@ -988,11 +1147,15 @@ function BookSheet({
 function PickScreen({
 	book,
 	energy,
+	hasAnyBooks,
+	onAdd,
 	onEnergy,
 	onReshuffle,
 }: {
 	book?: Book;
 	energy: string;
+	hasAnyBooks: boolean;
+	onAdd: () => void;
 	onEnergy: (energy: string) => void;
 	onReshuffle: () => void;
 }) {
@@ -1001,6 +1164,18 @@ function PickScreen({
 		: [];
 	const reason = book ? pickReason(book, energy, matches) : "";
 	const subtitle = pickSubtitle(energy);
+
+	if (!hasAnyBooks) {
+		return (
+			<EmptyState
+				actionLabel="Add books to pick from"
+				description="Pick works best after you save a few books as Want or Paused. Then it can choose based on the kind of attention you have."
+				eyebrow="No choices yet"
+				onAction={onAdd}
+				title="The shelf needs a few possibilities."
+			/>
+		);
+	}
 
 	return (
 		<section className="space-y-5">
@@ -1080,13 +1255,38 @@ function PickScreen({
 
 function JournalScreen({
 	books,
+	hasAnyBooks,
+	onAdd,
+	onNotify,
 	onUpdate,
 }: {
 	books: Book[];
+	hasAnyBooks: boolean;
+	onAdd: () => void;
+	onNotify: (message: string) => void;
 	onUpdate: (id: string, updates: Partial<Book>) => void;
 }) {
+	const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+
+	function saveMemory() {
+		setEditingMemoryId(null);
+		onNotify("Memory saved");
+	}
+
+	if (!hasAnyBooks) {
+		return (
+			<EmptyState
+				actionLabel="Add your first book"
+				description="Journal fills itself slowly. Finish a book, save what stayed, and it becomes a private memory here."
+				eyebrow="No memories yet"
+				onAction={onAdd}
+				title="Memories start after the first book."
+			/>
+		);
+	}
+
 	return (
-		<section className="space-y-4">
+		<section className="space-y-5">
 			<div>
 				<p className="text-sm font-bold uppercase tracking-[0.24em] text-sage">
 					Journal
@@ -1102,71 +1302,147 @@ function JournalScreen({
 			)}
 			{books.map((book) => {
 				const reflection = book.reflection ?? emptyReflection;
+				const isEditing = editingMemoryId === book.id;
+				const hasFeeling = reflection.feeling.trim().length > 0;
+				const hasQuote = reflection.quote.trim().length > 0;
+				const hasNote = reflection.note.trim().length > 0;
+				const hasGiveTo = (reflection.giveTo ?? "").trim().length > 0;
+
 				return (
 					<article className="surface page-marker p-5 pl-7" key={book.id}>
-						<div className="flex gap-4">
+						<div className="flex items-start gap-4">
 							<BookCover book={book} />
-							<div>
+							<div className="min-w-0 flex-1">
+								<p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">
+									Finished memory
+								</p>
 								<h3 className="font-serif text-2xl text-ink">{book.title}</h3>
 								<p className="text-sm text-muted">{book.author}</p>
 							</div>
+							<button
+								className="tap rounded-full px-3 py-2 text-xs font-bold text-sage"
+								onClick={() => setEditingMemoryId(isEditing ? null : book.id)}
+								type="button"
+							>
+								{isEditing ? "Close" : "Edit memory"}
+							</button>
 						</div>
-						<div className="mt-4 grid gap-3">
-							<label className="text-sm font-bold text-ink">
-								How did this book make you feel?
-								<textarea
-									className="field mt-2"
-									value={reflection.feeling}
-									onChange={(event) =>
-										onUpdate(book.id, {
-											reflection: {
-												...reflection,
-												feeling: event.target.value,
-											},
-										})
+
+						{isEditing ? (
+							<div className="mt-5 grid gap-3">
+								<label className="text-sm font-bold text-ink">
+									How did this book make you feel?
+									<textarea
+										className="field mt-2 min-h-24"
+										value={reflection.feeling}
+										onChange={(event) =>
+											onUpdate(book.id, {
+												reflection: {
+													...reflection,
+													feeling: event.target.value,
+												},
+											})
+										}
+									/>
+								</label>
+								<label className="text-sm font-bold text-ink">
+									What line stayed with you?
+									<input
+										className="field mt-2"
+										value={reflection.quote}
+										onChange={(event) =>
+											onUpdate(book.id, {
+												reflection: {
+													...reflection,
+													quote: event.target.value,
+												},
+											})
+										}
+									/>
+								</label>
+								<label className="text-sm font-bold text-ink">
+									Private note
+									<textarea
+										className="field mt-2 min-h-20"
+										value={reflection.note}
+										onChange={(event) =>
+											onUpdate(book.id, {
+												reflection: { ...reflection, note: event.target.value },
+											})
+										}
+									/>
+								</label>
+								<label className="text-sm font-bold text-ink">
+									Who would you give it to?
+									<input
+										className="field mt-2"
+										value={reflection.giveTo ?? ""}
+										onChange={(event) =>
+											onUpdate(book.id, {
+												reflection: {
+													...reflection,
+													giveTo: event.target.value,
+												},
+											})
+										}
+									/>
+								</label>
+								<label className="flex items-center gap-3 text-sm font-bold text-ink">
+									<input
+										checked={reflection.wouldReread}
+										type="checkbox"
+										onChange={(event) =>
+											onUpdate(book.id, {
+												reflection: {
+													...reflection,
+													wouldReread: event.target.checked,
+												},
+											})
+										}
+									/>
+									Would reread
+								</label>
+								<button
+									className="tap w-fit rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
+									onClick={saveMemory}
+									type="button"
+								>
+									Save memory
+								</button>
+							</div>
+						) : (
+							<div className="mt-5 space-y-4">
+								<MemoryField
+									label="How it felt"
+									text={
+										hasFeeling
+											? reflection.feeling
+											: "No feeling saved yet. Add one when the book settles."
 									}
 								/>
-							</label>
-							<label className="text-sm font-bold text-ink">
-								What line stayed with you?
-								<input
-									className="field mt-2"
-									value={reflection.quote}
-									onChange={(event) =>
-										onUpdate(book.id, {
-											reflection: { ...reflection, quote: event.target.value },
-										})
+								<MemoryField
+									label="Line that stayed"
+									quote
+									text={hasQuote ? reflection.quote : "No line saved yet."}
+								/>
+								{hasNote && (
+									<MemoryField label="Private note" text={reflection.note} />
+								)}
+								<MemoryField
+									label="Give it to"
+									text={
+										hasGiveTo
+											? (reflection.giveTo ?? "")
+											: "No person named yet."
 									}
 								/>
-							</label>
-							<label className="text-sm font-bold text-ink">
-								Who would you give it to?
-								<input
-									className="field mt-2"
-									value={reflection.giveTo ?? ""}
-									onChange={(event) =>
-										onUpdate(book.id, {
-											reflection: { ...reflection, giveTo: event.target.value },
-										})
-									}
-								/>
-							</label>
-							<label className="flex items-center gap-3 text-sm font-bold text-ink">
-								<input
-									checked={reflection.wouldReread}
-									type="checkbox"
-									onChange={(event) =>
-										onUpdate(book.id, {
-											reflection: {
-												...reflection,
-												wouldReread: event.target.checked,
-											},
-										})
-									}
-								/>
-								Would reread
-							</label>
-						</div>
+								<p className="rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3 text-sm font-bold text-sage">
+									{reflection.wouldReread
+										? "Would reread"
+										: "No reread note yet"}
+								</p>
+							</div>
+						)}
 					</article>
 				);
 			})}
@@ -1180,7 +1456,7 @@ function FinishReflectionSheet({
 	onUpdate,
 }: {
 	book: Book;
-	onClose: () => void;
+	onClose: (saved: boolean) => void;
 	onUpdate: (id: string, updates: Partial<Book>) => void;
 }) {
 	const reflection = book.reflection ?? emptyReflection;
@@ -1199,7 +1475,7 @@ function FinishReflectionSheet({
 			<button
 				aria-label="Skip reflection"
 				className="absolute inset-0 cursor-default"
-				onClick={onClose}
+				onClick={() => onClose(false)}
 				type="button"
 			/>
 			<section
@@ -1271,14 +1547,14 @@ function FinishReflectionSheet({
 				<div className="mt-5 flex flex-wrap gap-2">
 					<button
 						className="tap rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
-						onClick={onClose}
+						onClick={() => onClose(true)}
 						type="button"
 					>
 						Save memory
 					</button>
 					<button
 						className="tap rounded-full border border-[var(--theme-line)] px-5 py-3 font-bold text-ink"
-						onClick={onClose}
+						onClick={() => onClose(false)}
 						type="button"
 					>
 						Skip for now
@@ -1286,6 +1562,86 @@ function FinishReflectionSheet({
 				</div>
 			</section>
 		</div>
+	);
+}
+
+function MemoryField({
+	label,
+	quote = false,
+	text,
+}: {
+	label: string;
+	quote?: boolean;
+	text: string;
+}) {
+	return (
+		<div>
+			<p className="text-[0.68rem] font-bold uppercase tracking-[0.2em] text-muted">
+				{label}
+			</p>
+			<p
+				className={`${quote ? "font-serif text-xl italic leading-snug" : "text-sm leading-6"} mt-1 text-ink`}
+			>
+				{quote ? `"${text}"` : text}
+			</p>
+		</div>
+	);
+}
+
+function AppToast({ message }: { message: string }) {
+	if (!message) return null;
+
+	return (
+		<div className="fixed left-1/2 bottom-24 z-40 w-[min(22rem,calc(100%-2rem))] -translate-x-1/2 rounded-full border border-[var(--theme-line)] bg-paper/95 px-4 py-3 text-center text-sm font-bold text-ink shadow-soft backdrop-blur">
+			{message}
+		</div>
+	);
+}
+
+function EmptyState({
+	actionLabel,
+	description,
+	eyebrow,
+	onAction,
+	title,
+}: {
+	actionLabel: string;
+	description: string;
+	eyebrow: string;
+	onAction: () => void;
+	title: string;
+}) {
+	return (
+		<section className="surface page-marker p-6 pl-7">
+			<p className="text-xs font-bold uppercase tracking-[0.24em] text-sage">
+				{eyebrow}
+			</p>
+			<h2 className="mt-3 max-w-xl font-serif text-3xl leading-none text-ink">
+				{title}
+			</h2>
+			<p className="mt-3 max-w-xl text-sm leading-6 text-muted">
+				{description}
+			</p>
+			<div className="mt-5 grid gap-2 text-sm text-muted sm:grid-cols-3">
+				<p className="rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3">
+					Add what you might read.
+				</p>
+				<p className="rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3">
+					Mark what is open now.
+				</p>
+				<p className="rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3">
+					Remember what stayed.
+				</p>
+			</div>
+			<button
+				className="tap mt-6 rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
+				onClick={onAction}
+				type="button"
+			>
+				<Plus className="mr-1 inline size-4" />
+				{actionLabel}
+			</button>
+		</section>
 	);
 }
 

@@ -128,10 +128,9 @@ Recommended next steps, roughly in priority order:
 4. Support multiple current reads on the Now screen instead of only showing the first `reading` book.
 5. Add Shelf search and lightweight filters for status and mood.
 6. Add a finish-book reflection prompt when a book is marked `finished`.
-7. Remove or repurpose starter leftovers like unused header/footer/about components.
-8. Gate or remove devtools from the normal user-facing shell.
-9. Add real PWA polish: app icon, install metadata, and offline caching/service worker if needed.
-10. Add JSON export/import backup much later. It matters eventually, but it should not drive the current product work.
+7. Gate or remove devtools from the normal user-facing shell.
+8. Add real PWA polish: app icon, install metadata, and offline caching/service worker if needed.
+9. Add JSON export/import backup much later. It matters eventually, but it should not drive the current product work.
 
 ## Implementation Preferences
 
