@@ -11,6 +11,7 @@ import {
 import {
 	type Dispatch,
 	type SetStateAction,
+	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
@@ -893,11 +894,13 @@ function BookSheet({
 	const [searchError, setSearchError] = useState("");
 	const [hasTriedSave, setHasTriedSave] = useState(false);
 	const pageLookupKeyRef = useRef<string | null>(null);
+	const searchRequestIdRef = useRef(0);
 	const detailsRef = useRef<HTMLDivElement | null>(null);
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
 	const titleError = hasTriedSave && !draft.title.trim();
 	const authorError = hasTriedSave && !draft.author.trim();
 	const canSave = Boolean(draft.title.trim() && draft.author.trim());
+	const canLiveSearch = query.trim().length >= 3;
 
 	function handleSave() {
 		setHasTriedSave(true);
@@ -905,28 +908,61 @@ function BookSheet({
 		onSave();
 	}
 
-	async function searchOnline() {
+	const runSearch = useCallback(
+		async (searchQuery: string, source: "live" | "manual") => {
+			const trimmedQuery = searchQuery.trim();
+			if (!trimmedQuery) return;
+			const requestId = searchRequestIdRef.current + 1;
+			searchRequestIdRef.current = requestId;
+
+			setIsSearching(true);
+			setSearchError("");
+			if (source === "manual") {
+				setSelectedResultTitle("");
+			}
+
+			try {
+				const nextResults = await searchOpenLibrary(trimmedQuery);
+				if (searchRequestIdRef.current !== requestId) return;
+				setResults(nextResults);
+				if (nextResults.length === 0) {
+					setSearchError("No matching books found. Manual add still works.");
+				}
+			} catch {
+				if (searchRequestIdRef.current !== requestId) return;
+				setSearchError(
+					"Could not reach Open Library. Try again or add it manually.",
+				);
+			} finally {
+				if (searchRequestIdRef.current === requestId) {
+					setIsSearching(false);
+				}
+			}
+		},
+		[],
+	);
+
+	useEffect(() => {
+		const trimmedQuery = query.trim();
+		if (trimmedQuery.length < 3) {
+			searchRequestIdRef.current += 1;
+			setIsSearching(false);
+			setSearchError("");
+			setResults([]);
+			return;
+		}
+
+		const timer = window.setTimeout(() => {
+			runSearch(trimmedQuery, "live");
+		}, 450);
+
+		return () => window.clearTimeout(timer);
+	}, [query, runSearch]);
+
+	function searchOnline() {
 		const trimmedQuery =
 			query.trim() || [draft.title, draft.author].filter(Boolean).join(" ");
-		if (!trimmedQuery) return;
-
-		setIsSearching(true);
-		setSearchError("");
-		setSelectedResultTitle("");
-
-		try {
-			const nextResults = await searchOpenLibrary(trimmedQuery);
-			setResults(nextResults);
-			if (nextResults.length === 0) {
-				setSearchError("No matching books found. Manual add still works.");
-			}
-		} catch {
-			setSearchError(
-				"Could not reach Open Library. Try again or add it manually.",
-			);
-		} finally {
-			setIsSearching(false);
-		}
+		runSearch(trimmedQuery, "manual");
 	}
 
 	async function applyResult(result: OpenLibraryResult) {
@@ -1027,10 +1063,18 @@ function BookSheet({
 					<div className="mt-3 flex items-stretch rounded-2xl border border-[var(--theme-line)] bg-paper/70 p-1 focus-within:ring-3 focus-within:ring-[var(--theme-accent-soft)]">
 						<input
 							className="min-h-11 min-w-0 flex-1 border-0 bg-transparent px-3 text-sm text-ink outline-none placeholder:text-muted"
-							placeholder="Title or author"
+							placeholder="Type 3+ letters"
 							value={query}
 							onChange={(event) => setQuery(event.target.value)}
 						/>
+						{isSearching && (
+							<output
+								aria-label="Searching"
+								className="flex items-center px-2 text-sage"
+							>
+								<span className="h-4 w-4 rounded-full border-2 border-sage/30 border-t-sage motion-safe:animate-spin" />
+							</output>
+						)}
 						<button
 							className="tap inline-flex min-w-11 items-center justify-center rounded-xl bg-sage px-3 text-sm font-bold text-paper disabled:cursor-not-allowed disabled:opacity-60 sm:min-w-24 sm:px-4"
 							disabled={isSearching}
@@ -1043,6 +1087,16 @@ function BookSheet({
 							</span>
 						</button>
 					</div>
+					{query.trim().length > 0 && !canLiveSearch && !isSearching && (
+						<p className="mt-2 text-xs font-bold text-muted">
+							Keep typing to search Open Library.
+						</p>
+					)}
+					{isSearching && (
+						<p className="mt-2 text-xs font-bold text-sage">
+							Looking through Open Library...
+						</p>
+					)}
 					{searchError && (
 						<p className="mt-2 text-xs font-bold text-muted">{searchError}</p>
 					)}
