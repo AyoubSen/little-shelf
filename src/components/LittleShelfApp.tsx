@@ -460,15 +460,15 @@ function NowScreen({
 
 		return (
 			<section className="surface page-marker p-6 pl-7">
-				<p className="mb-3 text-sm font-bold text-sage">
+				<p className="text-xs font-bold uppercase tracking-[0.24em] text-sage">
 					No open book right now
 				</p>
-				<h2 className="font-serif text-3xl text-ink">
-					Let the shelf choose gently.
+				<h2 className="mt-3 max-w-xl font-serif text-3xl leading-none text-ink">
+					Nothing is asking for your bookmark today.
 				</h2>
-				<p className="mt-3 text-muted">
-					Pick from books you already saved, based on what you have energy for
-					today.
+				<p className="mt-3 max-w-xl text-sm leading-6 text-muted">
+					Choose from Want or Paused when you are ready. The shelf can make a
+					low-pressure suggestion without turning it into homework.
 				</p>
 				<button
 					className="tap mt-6 rounded-full bg-sage px-5 py-3 font-bold text-paper"
@@ -483,6 +483,12 @@ function NowScreen({
 
 	const [featuredBook, ...otherBooks] = books;
 	const progress = getProgressPercent(featuredBook);
+	const pagesLeft = featuredBook.progress
+		? Math.max(
+				featuredBook.progress.totalPages - featuredBook.progress.currentPage,
+				0,
+			)
+		: null;
 
 	function updateProgress(book: Book, currentPage: number) {
 		if (!book.progress) return;
@@ -505,71 +511,98 @@ function NowScreen({
 
 	return (
 		<section className="space-y-5">
-			<div>
+			<div className="surface page-marker p-5 pl-7">
 				<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
 					{books.length} current {books.length === 1 ? "read" : "reads"}
 				</p>
 				<h2 className="mt-2 font-serif text-3xl leading-none text-ink">
-					Continue where you left off.
+					Today’s open book.
 				</h2>
+				<p className="mt-3 max-w-xl text-sm leading-6 text-muted">
+					Keep one book close, and let the rest wait quietly nearby.
+				</p>
 			</div>
 
-			<div className="surface page-marker grid gap-5 p-5 pl-7 sm:grid-cols-[11rem_1fr]">
-				<BookCover book={featuredBook} large />
-				<div>
-					<p className="text-sm font-bold text-sage">
-						Most recent current read
-					</p>
-					<h3 className="mt-1 font-serif text-3xl leading-none text-ink">
-						{featuredBook.title}
-					</h3>
-					<p className="mt-1 text-muted">{featuredBook.author}</p>
-					{featuredBook.progress && (
-						<>
-							<div className="mt-5 h-3 overflow-hidden rounded-full bg-[var(--theme-accent-soft)]">
-								<div
-									className="h-full rounded-full bg-burgundy"
-									style={{ width: `${progress}%` }}
-								/>
-							</div>
-							<label className="mt-4 block text-sm font-bold text-ink">
-								Current page
-								<input
-									className="field mt-2"
-									min="0"
-									max={featuredBook.progress.totalPages}
-									type="number"
-									value={featuredBook.progress.currentPage}
-									onChange={(event) =>
-										updateProgress(featuredBook, Number(event.target.value))
-									}
-								/>
-							</label>
-							<p className="mt-2 text-sm text-muted">
-								{progress}% through {featuredBook.progress.totalPages} pages
-							</p>
-						</>
-					)}
-					<label className="mt-5 block text-sm font-bold text-ink">
-						A quick feeling
-						<textarea
-							className="field mt-2 min-h-28"
-							placeholder="What is this book doing to your mood?"
-							value={featuredBook.reflection?.feeling ?? ""}
-							onChange={(event) =>
-								updateFeeling(featuredBook, event.target.value)
-							}
-						/>
-					</label>
+			<div className="surface page-marker overflow-hidden p-0">
+				<div className="grid gap-5 p-5 pl-7 sm:grid-cols-[11rem_1fr]">
+					<BookCover book={featuredBook} large />
+					<div>
+						<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
+							Bookmark is here
+						</p>
+						<h3 className="mt-1 font-serif text-3xl leading-none text-ink">
+							{featuredBook.title}
+						</h3>
+						<p className="mt-1 text-muted">{featuredBook.author}</p>
+						{featuredBook.progress && (
+							<>
+								<div className="mt-5 grid gap-2 rounded-[1.35rem] bg-[var(--theme-surface-muted)] p-4">
+									<div className="flex items-end justify-between gap-3">
+										<div>
+											<p className="text-[0.68rem] font-bold uppercase tracking-[0.18em] text-muted">
+												Progress
+											</p>
+											<p className="mt-1 font-serif text-2xl leading-none text-ink">
+												Page {featuredBook.progress.currentPage}
+											</p>
+										</div>
+										<p className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-1 text-xs font-bold text-sage">
+											{progress}%
+										</p>
+									</div>
+									<div className="h-3 overflow-hidden rounded-full bg-[var(--theme-accent-soft)]">
+										<div
+											className="h-full rounded-full bg-burgundy"
+											style={{ width: `${progress}%` }}
+										/>
+									</div>
+									<p className="text-xs font-bold text-muted">
+										{pagesLeft === 0
+											? "Ready to be finished."
+											: `${pagesLeft} pages left of ${featuredBook.progress.totalPages}.`}
+									</p>
+								</div>
+								<label className="mt-4 block text-sm font-bold text-ink">
+									Current page
+									<input
+										className="field mt-2"
+										min="0"
+										max={featuredBook.progress.totalPages}
+										type="number"
+										value={featuredBook.progress.currentPage}
+										onChange={(event) =>
+											updateProgress(featuredBook, Number(event.target.value))
+										}
+									/>
+								</label>
+							</>
+						)}
+						<label className="mt-5 block text-sm font-bold text-ink">
+							A quick feeling
+							<textarea
+								className="field mt-2 min-h-28"
+								placeholder="What is this book doing to your mood?"
+								value={featuredBook.reflection?.feeling ?? ""}
+								onChange={(event) =>
+									updateFeeling(featuredBook, event.target.value)
+								}
+							/>
+						</label>
+					</div>
 				</div>
 			</div>
 
 			{otherBooks.length > 0 && (
 				<section className="space-y-3">
 					<div className="flex items-end justify-between border-b border-[var(--theme-line)] pb-2">
-						<h3 className="font-serif text-2xl leading-none text-ink">
-							Also open
-						</h3>
+						<div>
+							<p className="text-[0.68rem] font-bold uppercase tracking-[0.22em] text-muted">
+								Waiting nearby
+							</p>
+							<h3 className="mt-1 font-serif text-2xl leading-none text-ink">
+								Other open books
+							</h3>
+						</div>
 						<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-1 text-xs font-bold text-sage">
 							{otherBooks.length}
 						</span>
@@ -602,7 +635,7 @@ function CurrentReadCard({
 	const progress = getProgressPercent(book);
 
 	return (
-		<article className="surface grid grid-cols-[4.25rem_1fr] gap-4 p-3 sm:grid-cols-[5rem_1fr] sm:p-4">
+		<article className="surface grid grid-cols-[4.25rem_1fr] gap-4 p-3 shadow-none sm:grid-cols-[5rem_1fr] sm:p-4">
 			<BookCover book={book} />
 			<div className="min-w-0 py-1">
 				<div className="flex items-start justify-between gap-3">
@@ -613,11 +646,11 @@ function CurrentReadCard({
 						<p className="mt-1 text-sm text-muted">{book.author}</p>
 					</div>
 					<button
-						className="tap -mr-1 rounded-full px-3 py-1.5 text-xs font-bold text-sage"
+						className="tap -mr-1 rounded-full bg-[var(--theme-accent-soft)] px-3 py-1.5 text-xs font-bold text-sage"
 						onClick={() => onFocus(book.id)}
 						type="button"
 					>
-						Focus
+						Read this
 					</button>
 				</div>
 				{book.progress && (
