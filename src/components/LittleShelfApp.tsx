@@ -244,6 +244,33 @@ export function LittleShelfApp() {
 		notify(wasEditing ? "Book updated" : "Book added");
 	}
 
+	function saveDiscovery(result: OpenLibraryResult) {
+		const alreadySaved = books.some(
+			(book) =>
+				normalizeBookTitle(book.title) === normalizeBookTitle(result.title),
+		);
+
+		if (alreadySaved) {
+			notify("Already on your shelf");
+			return;
+		}
+
+		setBooks((current) => [
+			{
+				id: crypto.randomUUID(),
+				title: result.title,
+				author: result.author,
+				coverUrl: result.coverUrl,
+				coverColor: coverColors[0],
+				status: "want",
+				moodTags: [],
+				addedAt: new Date().toISOString(),
+			},
+			...current,
+		]);
+		notify("Saved to Want");
+	}
+
 	function editBook(book: Book) {
 		setActiveTab("Shelf");
 		setEditingId(book.id);
@@ -344,6 +371,7 @@ export function LittleShelfApp() {
 						setPickIndex(0);
 					}}
 					onSkip={() => setPickIndex((value) => value + 1)}
+					onSaveDiscovery={saveDiscovery}
 					savedTitles={books.map((savedBook) => savedBook.title)}
 				/>
 			)}
@@ -1208,6 +1236,7 @@ function PickScreen({
 	hasAnyBooks,
 	onAdd,
 	onEnergy,
+	onSaveDiscovery,
 	onSkip,
 	savedTitles,
 }: {
@@ -1216,6 +1245,7 @@ function PickScreen({
 	hasAnyBooks: boolean;
 	onAdd: () => void;
 	onEnergy: (energy: string) => void;
+	onSaveDiscovery: (result: OpenLibraryResult) => void;
 	onSkip: () => void;
 	savedTitles: string[];
 }) {
@@ -1243,13 +1273,12 @@ function PickScreen({
 				energy,
 				mode,
 			});
-			setDiscoveries(
-				nextDiscoveries.filter(
-					(result) =>
-						!normalizedSavedTitles.has(normalizeBookTitle(result.title)),
-				),
+			const filteredDiscoveries = nextDiscoveries.filter(
+				(result) =>
+					!normalizedSavedTitles.has(normalizeBookTitle(result.title)),
 			);
-			if (nextDiscoveries.length === 0) {
+			setDiscoveries(filteredDiscoveries);
+			if (filteredDiscoveries.length === 0) {
 				setDiscoveryError("Open Library did not have a clean suggestion here.");
 			}
 		} catch {
@@ -1397,7 +1426,14 @@ function PickScreen({
 				{discoveries.length > 0 && !isDiscovering && (
 					<div className="mt-4 grid gap-3 lg:grid-cols-3">
 						{discoveries.map((result) => (
-							<OpenLibrarySuggestionCard key={result.key} result={result} />
+							<OpenLibrarySuggestionCard
+								isSaved={normalizedSavedTitles.has(
+									normalizeBookTitle(result.title),
+								)}
+								key={result.key}
+								onSave={onSaveDiscovery}
+								result={result}
+							/>
 						))}
 					</div>
 				)}
@@ -1406,14 +1442,17 @@ function PickScreen({
 	);
 }
 
-function OpenLibrarySuggestionCard({ result }: { result: OpenLibraryResult }) {
+function OpenLibrarySuggestionCard({
+	isSaved,
+	onSave,
+	result,
+}: {
+	isSaved: boolean;
+	onSave: (result: OpenLibraryResult) => void;
+	result: OpenLibraryResult;
+}) {
 	return (
-		<a
-			className="tap grid grid-cols-[3.25rem_1fr] gap-3 rounded-2xl border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] p-3 text-left transition hover:border-sage/50 hover:bg-paper"
-			href={`https://openlibrary.org${result.key}`}
-			rel="noreferrer"
-			target="_blank"
-		>
+		<article className="grid grid-cols-[3.25rem_1fr] gap-3 rounded-2xl border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] p-3 text-left transition hover:border-sage/50 hover:bg-paper">
 			{result.coverUrl ? (
 				<img
 					alt=""
@@ -1431,11 +1470,26 @@ function OpenLibrarySuggestionCard({ result }: { result: OpenLibraryResult }) {
 					{result.author}
 					{result.year ? `, ${result.year}` : ""}
 				</span>
-				<span className="mt-2 block text-xs font-bold text-sage">
-					Open details
+				<span className="mt-3 flex flex-wrap gap-2">
+					<button
+						className="tap rounded-full bg-burgundy px-3 py-1.5 text-xs font-bold text-paper disabled:cursor-default disabled:opacity-60"
+						disabled={isSaved}
+						onClick={() => onSave(result)}
+						type="button"
+					>
+						{isSaved ? "Saved" : "Save to shelf"}
+					</button>
+					<a
+						className="tap rounded-full px-3 py-1.5 text-xs font-bold text-sage"
+						href={`https://openlibrary.org${result.key}`}
+						rel="noreferrer"
+						target="_blank"
+					>
+						Open details
+					</a>
 				</span>
 			</span>
-		</a>
+		</article>
 	);
 }
 
