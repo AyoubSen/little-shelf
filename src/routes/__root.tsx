@@ -2,7 +2,10 @@ import { TanStackDevtools } from "@tanstack/react-devtools";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
+import { registerServiceWorker } from "../registerServiceWorker";
 import appCss from "../styles.css?url";
+
+registerServiceWorker();
 
 export const Route = createRootRoute({
 	head: () => ({
@@ -18,6 +21,10 @@ export const Route = createRootRoute({
 				title: "Little Shelf",
 			},
 			{
+				name: "application-name",
+				content: "Little Shelf",
+			},
+			{
 				name: "description",
 				content: "A private reading diary and mood-based book picker.",
 			},
@@ -25,11 +32,48 @@ export const Route = createRootRoute({
 				name: "theme-color",
 				content: "#f7f0e5",
 			},
+			{
+				name: "apple-mobile-web-app-capable",
+				content: "yes",
+			},
+			{
+				name: "apple-mobile-web-app-title",
+				content: "Little Shelf",
+			},
+			{
+				name: "apple-mobile-web-app-status-bar-style",
+				content: "default",
+			},
+			{
+				name: "mobile-web-app-capable",
+				content: "yes",
+			},
+			{
+				property: "og:title",
+				content: "Little Shelf",
+			},
+			{
+				property: "og:description",
+				content: "A private reading diary and mood-based book picker.",
+			},
+			{
+				property: "og:type",
+				content: "website",
+			},
 		],
 		links: [
 			{
 				rel: "stylesheet",
 				href: appCss,
+			},
+			{
+				rel: "icon",
+				type: "image/svg+xml",
+				href: "/app-icon.svg",
+			},
+			{
+				rel: "apple-touch-icon",
+				href: "/logo192.png",
 			},
 			{
 				rel: "manifest",

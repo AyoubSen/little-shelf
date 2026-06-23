@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Little Shelf app icon</title>
+  <desc id="desc">A quiet book spine on a paper background.</desc>
+  <rect width="512" height="512" rx="116" fill="#f7f0e5" />
+  <rect x="104" y="92" width="304" height="328" rx="42" fill="#6f7f68" />
+  <path d="M151 92h62v328h-62c-26 0-47-21-47-47V139c0-26 21-47 47-47Z" fill="#7a3145" />
+  <path d="M213 92h33v328h-33Z" fill="#ead8c1" opacity="0.8" />
+  <path d="M286 150h72" stroke="#f7f0e5" stroke-width="19" stroke-linecap="round" opacity="0.88" />
+  <path d="M286 202h52" stroke="#f7f0e5" stroke-width="15" stroke-linecap="round" opacity="0.68" />
+  <path d="M286 356c30-34 69-34 99 0" stroke="#f7f0e5" stroke-width="17" stroke-linecap="round" fill="none" opacity="0.82" />
+  <path d="M126 393c32 21 76 31 130 31s98-10 130-31" stroke="#2f2a25" stroke-width="13" stroke-linecap="round" fill="none" opacity="0.14" />
+</svg>
