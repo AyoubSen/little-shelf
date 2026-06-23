@@ -37,6 +37,7 @@ type Tab = (typeof tabs)[number];
 const themes = ["paper", "moss", "plum", "night"] as const;
 type ThemeName = (typeof themes)[number];
 type ShelfFilter = "all" | BookStatus;
+type DiscoveryMode = "mood" | "author";
 
 type BookDraft = {
 	title: string;
@@ -60,6 +61,18 @@ type OpenLibraryDoc = {
 
 type OpenLibrarySearchResponse = {
 	docs?: OpenLibraryDoc[];
+};
+
+type OpenLibrarySubjectWork = {
+	key?: string;
+	title?: string;
+	authors?: { name?: string }[];
+	cover_id?: number;
+	first_publish_year?: number;
+};
+
+type OpenLibrarySubjectResponse = {
+	works?: OpenLibrarySubjectWork[];
 };
 
 type OpenLibraryEdition = {
@@ -330,7 +343,8 @@ export function LittleShelfApp() {
 						setEnergy(value);
 						setPickIndex(0);
 					}}
-					onReshuffle={() => setPickIndex((value) => value + 1)}
+					onSkip={() => setPickIndex((value) => value + 1)}
+					savedTitles={books.map((savedBook) => savedBook.title)}
 				/>
 			)}
 			{activeTab === "Journal" && (
@@ -1194,20 +1208,56 @@ function PickScreen({
 	hasAnyBooks,
 	onAdd,
 	onEnergy,
-	onReshuffle,
+	onSkip,
+	savedTitles,
 }: {
 	book?: Book;
 	energy: string;
 	hasAnyBooks: boolean;
 	onAdd: () => void;
 	onEnergy: (energy: string) => void;
-	onReshuffle: () => void;
+	onSkip: () => void;
+	savedTitles: string[];
 }) {
+	const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>("mood");
+	const [discoveries, setDiscoveries] = useState<OpenLibraryResult[]>([]);
+	const [isDiscovering, setIsDiscovering] = useState(false);
+	const [discoveryError, setDiscoveryError] = useState("");
 	const matches = book
 		? book.moodTags.filter((tag) => energyMap[energy].includes(tag))
 		: [];
 	const reason = book ? pickReason(book, energy, matches) : "";
 	const subtitle = pickSubtitle(energy);
+	const discoverySubject = getDiscoverySubject(energy, book);
+	const canDiscoverByAuthor = Boolean(book?.author);
+	const normalizedSavedTitles = new Set(savedTitles.map(normalizeBookTitle));
+
+	async function discoverBooks(mode: DiscoveryMode) {
+		setDiscoveryMode(mode);
+		setIsDiscovering(true);
+		setDiscoveryError("");
+
+		try {
+			const nextDiscoveries = await getOpenLibraryDiscoveries({
+				book,
+				energy,
+				mode,
+			});
+			setDiscoveries(
+				nextDiscoveries.filter(
+					(result) =>
+						!normalizedSavedTitles.has(normalizeBookTitle(result.title)),
+				),
+			);
+			if (nextDiscoveries.length === 0) {
+				setDiscoveryError("Open Library did not have a clean suggestion here.");
+			}
+		} catch {
+			setDiscoveryError("Could not reach Open Library. Try again in a moment.");
+		} finally {
+			setIsDiscovering(false);
+		}
+	}
 
 	if (!hasAnyBooks) {
 		return (
@@ -1231,8 +1281,9 @@ function PickScreen({
 					What do you have energy for?
 				</h2>
 				<p className="mt-3 max-w-xl text-sm leading-6 text-muted">
-					Choose the kind of attention you have. Little Shelf will stay inside
-					your saved books.
+					Choose the kind of attention you have. Little Shelf will pick from
+					books you already wanted, plus paused books that might be worth
+					returning to.
 				</p>
 			</div>
 			<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1274,14 +1325,19 @@ function PickScreen({
 								</span>
 							))}
 						</div>
-						<button
-							className="tap mt-5 rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
-							onClick={onReshuffle}
-							type="button"
-						>
-							<Dice5 className="mr-2 inline size-4" />
-							Reshuffle
-						</button>
+						<div className="mt-5 flex flex-wrap gap-2">
+							<button
+								className="tap rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
+								onClick={onSkip}
+								type="button"
+							>
+								<Dice5 className="mr-2 inline size-4" />
+								Not this one
+							</button>
+							<p className="self-center text-xs font-bold text-muted">
+								Skip without changing your shelf.
+							</p>
+						</div>
 					</div>
 				</article>
 			) : (
@@ -1293,7 +1349,93 @@ function PickScreen({
 					</p>
 				</div>
 			)}
+
+			<section className="surface p-5">
+				<div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+					<div>
+						<p className="text-xs font-bold uppercase tracking-[0.24em] text-sage">
+							Beyond your shelf
+						</p>
+						<h3 className="mt-2 font-serif text-2xl leading-none text-ink">
+							Find a possible next book.
+						</h3>
+						<p className="mt-2 max-w-xl text-sm leading-6 text-muted">
+							Optional Open Library suggestions. These stay outside your shelf
+							until you decide to add one yourself.
+						</p>
+					</div>
+					<div className="flex flex-wrap gap-2">
+						<button
+							className={`tap rounded-full px-4 py-2.5 text-sm font-bold ${discoveryMode === "mood" ? "bg-sage text-paper" : "border border-[var(--theme-line)] text-muted"}`}
+							disabled={isDiscovering}
+							onClick={() => discoverBooks("mood")}
+							type="button"
+						>
+							Try {discoverySubject.label}
+						</button>
+						<button
+							className={`tap rounded-full px-4 py-2.5 text-sm font-bold ${discoveryMode === "author" ? "bg-sage text-paper" : "border border-[var(--theme-line)] text-muted"}`}
+							disabled={isDiscovering || !canDiscoverByAuthor}
+							onClick={() => discoverBooks("author")}
+							type="button"
+						>
+							More by author
+						</button>
+					</div>
+				</div>
+
+				{isDiscovering && (
+					<p className="mt-4 rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3 text-sm font-bold text-sage">
+						Looking through Open Library...
+					</p>
+				)}
+				{discoveryError && !isDiscovering && (
+					<p className="mt-4 rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-3 text-sm text-muted">
+						{discoveryError}
+					</p>
+				)}
+				{discoveries.length > 0 && !isDiscovering && (
+					<div className="mt-4 grid gap-3 lg:grid-cols-3">
+						{discoveries.map((result) => (
+							<OpenLibrarySuggestionCard key={result.key} result={result} />
+						))}
+					</div>
+				)}
+			</section>
 		</section>
+	);
+}
+
+function OpenLibrarySuggestionCard({ result }: { result: OpenLibraryResult }) {
+	return (
+		<a
+			className="tap grid grid-cols-[3.25rem_1fr] gap-3 rounded-2xl border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] p-3 text-left transition hover:border-sage/50 hover:bg-paper"
+			href={`https://openlibrary.org${result.key}`}
+			rel="noreferrer"
+			target="_blank"
+		>
+			{result.coverUrl ? (
+				<img
+					alt=""
+					className="h-16 w-11 rounded-r-md rounded-l-sm object-cover shadow-cover"
+					src={result.coverUrl}
+				/>
+			) : (
+				<span className="h-16 w-11 rounded-r-md rounded-l-sm bg-sage/25 shadow-cover" />
+			)}
+			<span className="min-w-0 pt-0.5">
+				<span className="line-clamp-2 font-serif text-lg leading-tight text-ink">
+					{result.title}
+				</span>
+				<span className="mt-1 block text-xs leading-4 text-muted">
+					{result.author}
+					{result.year ? `, ${result.year}` : ""}
+				</span>
+				<span className="mt-2 block text-xs font-bold text-sage">
+					Open details
+				</span>
+			</span>
+		</a>
 	);
 }
 
@@ -1934,6 +2076,49 @@ async function searchOpenLibrary(query: string): Promise<OpenLibraryResult[]> {
 		.filter((result): result is OpenLibraryResult => result !== null);
 }
 
+async function getOpenLibraryDiscoveries({
+	book,
+	energy,
+	mode,
+}: {
+	book?: Book;
+	energy: string;
+	mode: DiscoveryMode;
+}): Promise<OpenLibraryResult[]> {
+	if (mode === "author" && book?.author) {
+		return searchOpenLibrary(`author:${book.author}`);
+	}
+
+	const subject = getDiscoverySubject(energy, book).subject;
+	const response = await fetch(
+		`https://openlibrary.org/subjects/${subject}.json?limit=9`,
+	);
+
+	if (!response.ok) {
+		throw new Error("Open Library subject lookup failed");
+	}
+
+	const data = (await response.json()) as OpenLibrarySubjectResponse;
+	return (data.works ?? [])
+		.map((work, index) => {
+			const title = work.title?.trim();
+			const author = work.authors?.[0]?.name?.trim();
+
+			if (!title || !author) return null;
+
+			return {
+				key: work.key ?? `/works/discovery-${index}`,
+				title,
+				author,
+				coverUrl: work.cover_id
+					? `https://covers.openlibrary.org/b/id/${work.cover_id}-M.jpg`
+					: undefined,
+				year: work.first_publish_year,
+			};
+		})
+		.filter((result): result is OpenLibraryResult => result !== null);
+}
+
 async function getOpenLibraryEditionPageCount(
 	workKey: string,
 	selectedTitle: string,
@@ -1995,19 +2180,59 @@ function normalizeBookTitle(title: string) {
 	return title.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function getDiscoverySubject(energy: string, book?: Book) {
+	if (book?.moodTags.includes("romantic")) {
+		return { label: "romance", subject: "romance" };
+	}
+	if (book?.moodTags.includes("dark")) {
+		return { label: "dark fiction", subject: "dark_fiction" };
+	}
+	if (book?.moodTags.includes("funny")) {
+		return { label: "humor", subject: "humor" };
+	}
+	if (energy === "soft and easy") {
+		return { label: "comfort reads", subject: "juvenile_fiction" };
+	}
+	if (energy === "hurt a little") {
+		return { label: "literary fiction", subject: "literary_fiction" };
+	}
+	if (energy === "fast and sticky") {
+		return { label: "thrillers", subject: "thriller" };
+	}
+	if (energy === "beautiful sentences") {
+		return { label: "poetic fiction", subject: "poetry" };
+	}
+	if (energy === "strange and smart") {
+		return { label: "philosophy", subject: "philosophy" };
+	}
+	return { label: "something odd", subject: "speculative_fiction" };
+}
+
 function rankBooks(books: Book[], energy: string) {
 	const tags = energyMap[energy];
 	if (energy === "surprise me") {
-		return [...books].sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+		return [...books].sort((a, b) => {
+			const statusDiff = statusPickWeight(b) - statusPickWeight(a);
+			if (statusDiff !== 0) return statusDiff;
+			return a.addedAt.localeCompare(b.addedAt);
+		});
 	}
-	return [...books].sort((a, b) => scoreBook(b, tags) - scoreBook(a, tags));
+	return [...books].sort((a, b) => {
+		const scoreDiff = scoreBook(b, tags) - scoreBook(a, tags);
+		if (scoreDiff !== 0) return scoreDiff;
+		return b.addedAt.localeCompare(a.addedAt);
+	});
 }
 
 function scoreBook(book: Book, tags: MoodTag[]) {
 	const tagScore = book.moodTags.filter((tag) => tags.includes(tag)).length * 3;
 	const pausedNudge = book.status === "paused" ? 1 : 0;
 	const shortNudge = book.moodTags.includes("short") ? 1 : 0;
-	return tagScore + pausedNudge + shortNudge;
+	return tagScore + pausedNudge + shortNudge + statusPickWeight(book);
+}
+
+function statusPickWeight(book: Book) {
+	return book.status === "want" ? 2 : 0;
 }
 
 function pickSubtitle(energy: string) {
@@ -2021,20 +2246,52 @@ function pickSubtitle(energy: string) {
 
 function pickReason(book: Book, energy: string, matches: MoodTag[]) {
 	if (energy === "surprise me") {
-		return `${book.title} is waiting on your shelf, and surprise mode is choosing by instinct rather than matching a mood.`;
+		return book.status === "paused"
+			? `${book.title} has been paused long enough to become interesting again. Surprise mode is giving it a quiet tap on the spine.`
+			: `${book.title} is waiting on your shelf, and surprise mode is choosing by instinct rather than matching a mood.`;
 	}
 
 	if (matches.length === 0) {
-		return `${book.title} is not a perfect tag match, but it is already saved and ready. Sometimes that is enough of a reason.`;
+		return book.status === "paused"
+			? `${book.title} is not a clean match for ${energy}, but it is already half-open in your reading life. That can be reason enough to return.`
+			: `${book.title} is not a perfect tag match, but it is already saved and ready. Sometimes that is enough of a reason.`;
 	}
 
-	const tagList = readableList(matches);
+	const tagList = readableList(matches.map(moodTagLabel));
+	const moodNote = pickMoodNote(energy, matches);
 	const statusNote =
 		book.status === "paused"
-			? " It was paused, so this is also a gentle invitation to return."
+			? " It was paused before, so this is a low-pressure invitation to return rather than start from zero."
 			: "";
 
-	return `This fits ${energy} because you tagged it ${tagList}.${statusNote}`;
+	return `${moodNote} You tagged it ${tagList}.${statusNote}`;
+}
+
+function pickMoodNote(energy: string, matches: MoodTag[]) {
+	if (energy === "soft and easy") {
+		return matches.includes("short")
+			? "This should be easy to enter and not too heavy to carry."
+			: "This looks like a gentle door back into reading.";
+	}
+	if (energy === "hurt a little") {
+		return "This has enough ache or tenderness to leave an aftertaste.";
+	}
+	if (energy === "fast and sticky") {
+		return "This has the kind of pull that can make one more chapter happen by accident.";
+	}
+	if (energy === "beautiful sentences") {
+		return "This is a slower pick, better for noticing the shape of the sentences.";
+	}
+	if (energy === "strange and smart") {
+		return "This has odd corners and enough bite to keep your attention awake.";
+	}
+	return "The shelf is following the strongest mood signal it can find.";
+}
+
+function moodTagLabel(tag: MoodTag) {
+	if (tag === "smart") return "sharp";
+	if (tag === "easy") return "easygoing";
+	return tag;
 }
 
 function readableList(items: string[]) {
