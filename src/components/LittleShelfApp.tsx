@@ -815,12 +815,12 @@ function MeowshroomNote() {
 						A note found under the moss
 					</p>
 					<h3 className="mt-2 font-serif text-3xl leading-none text-[#3C2A20]">
-						meowshroom was here.
+						Insaf was here.
 					</h3>
 					<p className="mt-3 max-w-xl text-sm leading-6 text-[#6F5648]">
-						A tiny shelf spirit has approved this reading cave. It recommends a
-						blanket, one suspiciously warm drink, and a book with at least one
-						soft corner.
+						The Algerian cat council has approved this reading cave. It
+						recommends one strange detective thought, one impossible boss fight,
+						and a seat at the very top of the shelf.
 					</p>
 				</div>
 			</div>
