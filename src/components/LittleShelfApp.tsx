@@ -619,6 +619,7 @@ function ShelfScreen(props: {
 	const [filter, setFilter] = useState<ShelfFilter>("all");
 	const sections = ["reading", "want", "finished", "paused"] as BookStatus[];
 	const normalizedQuery = query.trim().toLowerCase();
+	const foundMeowshroom = normalizedQuery.includes("meowshroom");
 	const isFiltered = normalizedQuery.length > 0 || filter !== "all";
 	const filteredBooks = props.books.filter((book) => {
 		const matchesQuery = normalizedQuery
@@ -694,6 +695,8 @@ function ShelfScreen(props: {
 						</div>
 					</div>
 
+					{foundMeowshroom && <MeowshroomNote />}
+
 					{isFiltered ? (
 						<section className="space-y-3">
 							<div className="flex items-end justify-between gap-3 border-b border-[var(--theme-line)] pb-3">
@@ -729,6 +732,11 @@ function ShelfScreen(props: {
 										/>
 									))}
 								</div>
+							) : foundMeowshroom ? (
+								<p className="rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-5 text-sm text-muted">
+									No shelf books match that secret word. The note still found
+									you.
+								</p>
 							) : (
 								<p className="rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-5 text-sm text-muted">
 									No books match that search. Try a title, author, or another
@@ -781,6 +789,42 @@ function ShelfScreen(props: {
 				</>
 			)}
 		</section>
+	);
+}
+
+function MeowshroomNote() {
+	return (
+		<aside className="relative overflow-hidden rounded-[1.65rem] border border-[#B78D68]/45 bg-[#F8E8D4] p-5 text-[#3C2A20] shadow-soft">
+			<div className="absolute -right-8 -top-10 h-28 w-28 rounded-full bg-[#D86B58]/20 blur-2xl" />
+			<div className="relative grid gap-4 sm:grid-cols-[4.5rem_1fr] sm:items-center">
+				<div
+					aria-hidden="true"
+					className="mx-auto flex h-20 w-20 items-end justify-center rounded-full bg-[#5D6E4A]/15 pb-3 shadow-[inset_0_-10px_0_rgba(93,110,74,0.08)] sm:mx-0"
+				>
+					<div className="relative h-12 w-12">
+						<span className="absolute left-1/2 top-0 h-8 w-10 -translate-x-1/2 rounded-t-full bg-[#D86B58] shadow-[inset_-7px_-5px_0_rgba(60,42,32,0.14)]" />
+						<span className="absolute left-4 top-2 h-2 w-2 rounded-full bg-[#F8E8D4]" />
+						<span className="absolute right-4 top-3 h-1.5 w-1.5 rounded-full bg-[#F8E8D4]" />
+						<span className="absolute bottom-0 left-1/2 h-8 w-5 -translate-x-1/2 rounded-b-full rounded-t-sm bg-[#F3D1AE]" />
+						<span className="absolute bottom-4 left-3 h-1 w-1 rounded-full bg-[#3C2A20]" />
+						<span className="absolute bottom-4 right-3 h-1 w-1 rounded-full bg-[#3C2A20]" />
+					</div>
+				</div>
+				<div>
+					<p className="text-[0.68rem] font-black uppercase tracking-[0.24em] text-[#8C4A3B]">
+						A note found under the moss
+					</p>
+					<h3 className="mt-2 font-serif text-3xl leading-none text-[#3C2A20]">
+						meowshroom was here.
+					</h3>
+					<p className="mt-3 max-w-xl text-sm leading-6 text-[#6F5648]">
+						A tiny shelf spirit has approved this reading cave. It recommends a
+						blanket, one suspiciously warm drink, and a book with at least one
+						soft corner.
+					</p>
+				</div>
+			</div>
+		</aside>
 	);
 }
 
