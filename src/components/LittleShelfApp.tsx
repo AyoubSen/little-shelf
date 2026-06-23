@@ -889,9 +889,19 @@ function BookSheet({
 	const [pageLookupKey, setPageLookupKey] = useState<string | null>(null);
 	const [selectedResultTitle, setSelectedResultTitle] = useState("");
 	const [searchError, setSearchError] = useState("");
+	const [hasTriedSave, setHasTriedSave] = useState(false);
 	const pageLookupKeyRef = useRef<string | null>(null);
 	const detailsRef = useRef<HTMLDivElement | null>(null);
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
+	const titleError = hasTriedSave && !draft.title.trim();
+	const authorError = hasTriedSave && !draft.author.trim();
+	const canSave = Boolean(draft.title.trim() && draft.author.trim());
+
+	function handleSave() {
+		setHasTriedSave(true);
+		if (!canSave) return;
+		onSave();
+	}
 
 	async function searchOnline() {
 		const trimmedQuery =
@@ -918,6 +928,7 @@ function BookSheet({
 	}
 
 	async function applyResult(result: OpenLibraryResult) {
+		setHasTriedSave(false);
 		pageLookupKeyRef.current = result.key;
 		setPageLookupKey(result.key);
 		setSelectedResultTitle(result.title);
@@ -1088,7 +1099,8 @@ function BookSheet({
 						<label className="grid gap-2 text-sm font-bold text-ink">
 							Title
 							<input
-								className="field min-h-12"
+								aria-invalid={titleError}
+								className={`field min-h-12 ${titleError ? "border-burgundy ring-3 ring-burgundy/15" : ""}`}
 								placeholder="Title"
 								ref={titleInputRef}
 								value={draft.title}
@@ -1096,17 +1108,26 @@ function BookSheet({
 									onChangeDraft({ ...draft, title: event.target.value })
 								}
 							/>
+							{titleError && (
+								<p className="text-xs font-bold text-burgundy">Add a title.</p>
+							)}
 						</label>
 						<label className="grid gap-2 text-sm font-bold text-ink">
 							Author
 							<input
-								className="field min-h-12"
+								aria-invalid={authorError}
+								className={`field min-h-12 ${authorError ? "border-burgundy ring-3 ring-burgundy/15" : ""}`}
 								placeholder="Author"
 								value={draft.author}
 								onChange={(event) =>
 									onChangeDraft({ ...draft, author: event.target.value })
 								}
 							/>
+							{authorError && (
+								<p className="text-xs font-bold text-burgundy">
+									Add an author.
+								</p>
+							)}
 						</label>
 						<label className="grid gap-2 text-sm font-bold text-ink">
 							Status
@@ -1209,8 +1230,9 @@ function BookSheet({
 				</div>
 				<div className="mt-5 flex gap-2">
 					<button
-						className="tap rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
-						onClick={onSave}
+						className="tap rounded-full bg-burgundy px-5 py-3 font-bold text-paper disabled:cursor-not-allowed disabled:opacity-60"
+						disabled={hasTriedSave && !canSave}
+						onClick={handleSave}
 						type="button"
 					>
 						{isEditing ? "Save changes" : "Add book"}
@@ -1507,6 +1529,7 @@ function JournalScreen({
 	onUpdate: (id: string, updates: Partial<Book>) => void;
 }) {
 	const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+	const sortedBooks = sortFinishedBooks(books);
 
 	function saveMemory() {
 		setEditingMemoryId(null);
@@ -1527,49 +1550,67 @@ function JournalScreen({
 
 	return (
 		<section className="space-y-5">
-			<div>
+			<div className="surface page-marker p-5 pl-7">
 				<p className="text-sm font-bold uppercase tracking-[0.24em] text-sage">
 					Journal
 				</p>
-				<h2 className="mt-2 font-serif text-3xl text-ink">
+				<h2 className="mt-2 font-serif text-3xl leading-none text-ink">
 					Finished books as memories
 				</h2>
+				<p className="mt-3 max-w-xl text-sm leading-6 text-muted">
+					The shelf slows down here. Finished books are sorted by when they left
+					you, with the feeling first and the bookkeeping tucked away.
+				</p>
 			</div>
 			{books.length === 0 && (
 				<p className="surface p-5 text-muted">
 					Finished books will gather here as a private reading diary.
 				</p>
 			)}
-			{books.map((book) => {
+			{sortedBooks.map((book) => {
 				const reflection = book.reflection ?? emptyReflection;
 				const isEditing = editingMemoryId === book.id;
 				const hasFeeling = reflection.feeling.trim().length > 0;
 				const hasQuote = reflection.quote.trim().length > 0;
 				const hasNote = reflection.note.trim().length > 0;
 				const hasGiveTo = (reflection.giveTo ?? "").trim().length > 0;
+				const finishedDate = formatFinishedDate(book.finishedAt);
+				const hasNisserinNote = memoryMentionsNisserin(book, reflection);
 
 				return (
-					<article className="surface page-marker p-5 pl-7" key={book.id}>
-						<div className="flex items-start gap-4">
+					<article
+						className="surface page-marker overflow-hidden p-0"
+						key={book.id}
+					>
+						<div className="grid gap-4 p-5 pl-7 sm:grid-cols-[5rem_1fr_auto] sm:items-start">
 							<BookCover book={book} />
-							<div className="min-w-0 flex-1">
-								<p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">
-									Finished memory
-								</p>
-								<h3 className="font-serif text-2xl text-ink">{book.title}</h3>
-								<p className="text-sm text-muted">{book.author}</p>
+							<div className="min-w-0">
+								<div className="flex flex-wrap items-center gap-2">
+									<p className="text-xs font-bold uppercase tracking-[0.2em] text-sage">
+										Finished memory
+									</p>
+									<span className="rounded-full bg-[var(--theme-accent-soft)] px-2.5 py-1 text-[0.68rem] font-bold text-sage">
+										{finishedDate}
+									</span>
+								</div>
+								<h3 className="mt-2 font-serif text-3xl leading-none text-ink">
+									{book.title}
+								</h3>
+								<p className="mt-1 text-sm text-muted">{book.author}</p>
 							</div>
-							<button
-								className="tap rounded-full px-3 py-2 text-xs font-bold text-sage"
-								onClick={() => setEditingMemoryId(isEditing ? null : book.id)}
-								type="button"
-							>
-								{isEditing ? "Close" : "Edit memory"}
-							</button>
+							<div className="flex sm:justify-end">
+								<button
+									className="tap rounded-full border border-[var(--theme-line)] px-3 py-2 text-xs font-bold text-sage"
+									onClick={() => setEditingMemoryId(isEditing ? null : book.id)}
+									type="button"
+								>
+									{isEditing ? "Close" : "Edit memory"}
+								</button>
+							</div>
 						</div>
 
 						{isEditing ? (
-							<div className="mt-5 grid gap-3">
+							<div className="grid gap-3 border-t border-[var(--theme-line)] p-5 pl-7">
 								<label className="text-sm font-bold text-ink">
 									How did this book make you feel?
 									<textarea
@@ -1651,36 +1692,36 @@ function JournalScreen({
 								</button>
 							</div>
 						) : (
-							<div className="mt-5 space-y-4">
-								<MemoryField
-									label="How it felt"
-									text={
-										hasFeeling
-											? reflection.feeling
-											: "No feeling saved yet. Add one when the book settles."
-									}
-								/>
-								<MemoryField
-									label="Line that stayed"
-									quote
-									text={hasQuote ? reflection.quote : "No line saved yet."}
-								/>
+							<div className="grid gap-4 border-t border-[var(--theme-line)] p-5 pl-7">
+								{hasNisserinNote && <NisserinJournalNote />}
+								<div className="grid gap-4 lg:grid-cols-[1fr_0.85fr]">
+									<MemoryField
+										label="How it felt"
+										text={
+											hasFeeling
+												? reflection.feeling
+												: "No feeling saved yet. Add one when the book settles."
+										}
+									/>
+									<MemoryField
+										label="Line that stayed"
+										quote
+										text={hasQuote ? reflection.quote : "No line saved yet."}
+									/>
+								</div>
 								{hasNote && (
 									<MemoryField label="Private note" text={reflection.note} />
 								)}
-								<MemoryField
-									label="Give it to"
-									text={
-										hasGiveTo
-											? (reflection.giveTo ?? "")
-											: "No person named yet."
-									}
-								/>
-								<p className="rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3 text-sm font-bold text-sage">
-									{reflection.wouldReread
-										? "Would reread"
-										: "No reread note yet"}
-								</p>
+								<div className="flex flex-wrap gap-2">
+									<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-2 text-xs font-bold text-sage">
+										{hasGiveTo
+											? `Give to ${reflection.giveTo}`
+											: "No person named"}
+									</span>
+									<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-2 text-xs font-bold text-sage">
+										{reflection.wouldReread ? "Would reread" : "No reread note"}
+									</span>
+								</div>
 							</div>
 						)}
 					</article>
@@ -1815,17 +1856,74 @@ function MemoryField({
 	text: string;
 }) {
 	return (
-		<div>
+		<div
+			className={
+				quote
+					? "rounded-[1.35rem] bg-[var(--theme-surface-muted)] px-4 py-4"
+					: ""
+			}
+		>
 			<p className="text-[0.68rem] font-bold uppercase tracking-[0.2em] text-muted">
 				{label}
 			</p>
 			<p
-				className={`${quote ? "font-serif text-xl italic leading-snug" : "text-sm leading-6"} mt-1 text-ink`}
+				className={`${quote ? "font-serif text-2xl italic leading-snug" : "text-sm leading-6"} mt-1 text-ink`}
 			>
 				{quote ? `"${text}"` : text}
 			</p>
 		</div>
 	);
+}
+
+function NisserinJournalNote() {
+	return (
+		<aside className="rounded-[1.35rem] border border-[#9B6A7A]/25 bg-[#F5E8EC] px-4 py-3 text-[#3F2D33]">
+			<p className="text-[0.68rem] font-black uppercase tracking-[0.22em] text-[#8A5263]">
+				A margin note
+			</p>
+			<p className="mt-2 text-sm leading-6 text-[#684D56]">
+				Someone with excellent taste has passed through this page. The book is
+				still pretending to be calm about it.
+			</p>
+		</aside>
+	);
+}
+
+function sortFinishedBooks(books: Book[]) {
+	return [...books].sort((a, b) => {
+		const aTime = new Date(a.finishedAt ?? a.addedAt).getTime();
+		const bTime = new Date(b.finishedAt ?? b.addedAt).getTime();
+		return bTime - aTime;
+	});
+}
+
+function memoryMentionsNisserin(
+	book: Book,
+	reflection: typeof emptyReflection,
+) {
+	const memoryText = [
+		book.title,
+		book.author,
+		reflection.feeling,
+		reflection.quote,
+		reflection.note,
+		reflection.giveTo ?? "",
+	]
+		.join(" ")
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.toLowerCase();
+
+	return memoryText.includes("nisserin");
+}
+
+function formatFinishedDate(date?: string) {
+	if (!date) return "Finished someday";
+	return new Intl.DateTimeFormat("en", {
+		day: "numeric",
+		month: "short",
+		year: "numeric",
+	}).format(new Date(date));
 }
 
 function AppToast({ message }: { message: string }) {
