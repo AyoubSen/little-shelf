@@ -53,8 +53,10 @@ type BookDraft = {
 type OpenLibraryDoc = {
 	key?: string;
 	title?: string;
+	title_suggest?: string;
 	author_name?: string[];
 	cover_i?: number;
+	language?: string[];
 	number_of_pages_median?: number;
 	first_publish_year?: number;
 };
@@ -2185,7 +2187,8 @@ function loadFocusedReadingId() {
 
 async function searchOpenLibrary(query: string): Promise<OpenLibraryResult[]> {
 	const params = new URLSearchParams({
-		limit: "6",
+		language: "eng",
+		limit: "18",
 		q: query,
 	});
 	const response = await fetch(`https://openlibrary.org/search.json?${params}`);
@@ -2209,8 +2212,8 @@ async function searchOpenLibrary(query: string): Promise<OpenLibraryResult[]> {
 	}
 	return (data.docs ?? [])
 		.map((doc, index) => {
-			const title = doc.title?.trim();
-			const author = doc.author_name?.[0]?.trim();
+			const title = getPreferredOpenLibraryTitle(doc);
+			const author = getPreferredOpenLibraryAuthor(doc);
 
 			if (!title || !author) return null;
 
@@ -2225,7 +2228,9 @@ async function searchOpenLibrary(query: string): Promise<OpenLibraryResult[]> {
 				year: doc.first_publish_year,
 			};
 		})
-		.filter((result): result is OpenLibraryResult => result !== null);
+		.filter((result): result is OpenLibraryResult => result !== null)
+		.sort((a, b) => scoreOpenLibraryResult(b) - scoreOpenLibraryResult(a))
+		.slice(0, 6);
 }
 
 async function getOpenLibraryDiscoveries({
@@ -2330,6 +2335,43 @@ function getEditionPageCount(edition: OpenLibraryEdition) {
 
 function normalizeBookTitle(title: string) {
 	return title.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getPreferredOpenLibraryTitle(doc: OpenLibraryDoc) {
+	return (
+		[doc.title_suggest, doc.title]
+			.map((title) => title?.trim())
+			.find((title): title is string => Boolean(title && isLatinText(title))) ??
+		doc.title?.trim() ??
+		doc.title_suggest?.trim() ??
+		""
+	);
+}
+
+function getPreferredOpenLibraryAuthor(doc: OpenLibraryDoc) {
+	return (
+		doc.author_name
+			?.map((author) => author.trim())
+			.find((author) => isLatinText(author)) ??
+		doc.author_name?.[0]?.trim() ??
+		""
+	);
+}
+
+function scoreOpenLibraryResult(result: OpenLibraryResult) {
+	let score = 0;
+	if (isLatinText(result.title)) score += 8;
+	if (isLatinText(result.author)) score += 4;
+	if (result.coverUrl) score += 1;
+	if (result.year) score += 1;
+	return score;
+}
+
+function isLatinText(text: string) {
+	const letters = [...text].filter((char) => /\p{L}/u.test(char));
+	if (letters.length === 0) return true;
+	const latinLetters = letters.filter((char) => /\p{Script=Latin}/u.test(char));
+	return latinLetters.length / letters.length >= 0.75;
 }
 
 function getDiscoverySubject(energy: string, book?: Book) {

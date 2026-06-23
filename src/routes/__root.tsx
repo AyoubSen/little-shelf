@@ -1,11 +1,8 @@
-import { TanStackDevtools } from "@tanstack/react-devtools";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
+import { useEffect } from "react";
 
 import { registerServiceWorker } from "../registerServiceWorker";
 import appCss from "../styles.css?url";
-
-registerServiceWorker();
 
 export const Route = createRootRoute({
 	head: () => ({
@@ -92,20 +89,18 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 			</head>
 			<body className="font-sans antialiased selection:bg-burgundy/20">
+				<ServiceWorkerRegistration />
 				{children}
-				<TanStackDevtools
-					config={{
-						position: "bottom-right",
-					}}
-					plugins={[
-						{
-							name: "Tanstack Router",
-							render: <TanStackRouterDevtoolsPanel />,
-						},
-					]}
-				/>
 				<Scripts />
 			</body>
 		</html>
 	);
+}
+
+function ServiceWorkerRegistration() {
+	useEffect(() => {
+		registerServiceWorker();
+	}, []);
+
+	return null;
 }
