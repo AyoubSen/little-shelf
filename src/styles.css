@@ -15,18 +15,18 @@
 }
 
 :root {
-  --theme-bg: #f3efe6;
-  --theme-bg-soft: #ebe4d7;
-  --theme-surface: #fffdf7;
-  --theme-surface-muted: #f8f3ea;
-  --theme-ink: #25211d;
-  --theme-muted: #756c60;
-  --theme-line: rgba(37, 33, 29, 0.12);
-  --theme-accent: #556f5d;
-  --theme-strong: #7a3f4b;
-  --theme-accent-soft: rgba(85, 111, 93, 0.12);
-  --theme-strong-soft: rgba(122, 63, 75, 0.12);
-  --theme-shadow: rgba(60, 48, 36, 0.1);
+  --theme-bg: #ede8da;
+  --theme-bg-soft: #ddd5c2;
+  --theme-surface: #fffaf0;
+  --theme-surface-muted: #f3ead8;
+  --theme-ink: #232526;
+  --theme-muted: #6f695d;
+  --theme-line: rgba(35, 37, 38, 0.14);
+  --theme-accent: #385f74;
+  --theme-strong: #9a4638;
+  --theme-accent-soft: rgba(56, 95, 116, 0.13);
+  --theme-strong-soft: rgba(154, 70, 56, 0.13);
+  --theme-shadow: rgba(52, 45, 34, 0.11);
   --theme-highlight: rgba(255, 255, 255, 0.82);
 }
 
@@ -90,8 +90,8 @@ body {
   margin: 0;
   color: var(--theme-ink);
   background:
-    linear-gradient(90deg, var(--theme-accent-soft) 0 9px, transparent 9px),
-    radial-gradient(circle at 18% 0%, var(--theme-strong-soft), transparent 28rem),
+    linear-gradient(90deg, var(--theme-accent-soft) 0 0.55rem, transparent 0.55rem 1.15rem, rgba(35, 37, 38, 0.035) 1.15rem 1.2rem, transparent 1.2rem),
+    radial-gradient(circle at 12% 0%, var(--theme-strong-soft), transparent 25rem),
     linear-gradient(180deg, var(--theme-bg), var(--theme-bg-soft));
   font-family: var(--font-sans);
   letter-spacing: -0.011em;
@@ -110,6 +110,15 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+}
+
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--theme-accent) 74%, white);
+  outline-offset: 3px;
+}
+
 textarea {
   resize: vertical;
 }
@@ -121,6 +130,7 @@ textarea {
 .tap {
   min-height: 44px;
   transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .tap:active {
@@ -129,9 +139,14 @@ textarea {
 
 .surface {
   border: 1px solid var(--theme-line);
-  border-radius: 1.5rem;
+  border-radius: 1.35rem;
   background: color-mix(in oklab, var(--theme-surface) 94%, transparent);
   box-shadow: var(--shadow-soft);
+}
+
+.soft-scroll {
+  scrollbar-color: color-mix(in oklab, var(--theme-muted) 42%, transparent) transparent;
+  scrollbar-width: thin;
 }
 
 .page-marker {
@@ -142,12 +157,12 @@ textarea {
 .page-marker::before {
   content: "";
   position: absolute;
-  inset-block: 1.1rem;
+  inset-block: 0.9rem;
   left: 0;
-  width: 4px;
-  border-radius: 999px;
-  background: var(--theme-accent);
-  opacity: 0.62;
+  width: 0.58rem;
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(180deg, var(--theme-accent), var(--theme-strong));
+  opacity: 0.74;
 }
 
 .field {
@@ -169,15 +184,26 @@ textarea {
   box-shadow: 0 0 0 3px var(--theme-accent-soft);
 }
 
+.field:focus-visible {
+  outline: none;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+}
+
 .chip {
   min-height: 38px;
   border-radius: 999px;
   border: 1px solid var(--theme-line);
   background: var(--theme-surface-muted);
   color: var(--theme-muted);
-  padding: 0.52rem 0.8rem;
+  padding: 0.48rem 0.78rem;
   font-size: 0.82rem;
   font-weight: 700;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
 .chip-on {

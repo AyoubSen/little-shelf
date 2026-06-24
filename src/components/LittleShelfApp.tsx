@@ -5,6 +5,7 @@ import {
 	NotebookPen,
 	Plus,
 	Search,
+	Settings,
 	Sparkles,
 	Trash2,
 } from "lucide-react";
@@ -29,8 +30,13 @@ import {
 	moodTags,
 	statusLabels,
 } from "./bookData";
+import {
+	loadBooks,
+	parseBooksJson,
+	serializeShelfBackup,
+	storageKey,
+} from "./bookStorage";
 
-const storageKey = "little-shelf-books";
 const themeStorageKey = "little-shelf-theme";
 const focusedReadingStorageKey = "little-shelf-focused-reading";
 const tabs = ["Now", "Shelf", "Pick", "Journal"] as const;
@@ -114,11 +120,15 @@ export function LittleShelfApp() {
 	const [draft, setDraft] = useState<BookDraft>(blankDraft);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [isBookSheetOpen, setIsBookSheetOpen] = useState(false);
+	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [finishingBookId, setFinishingBookId] = useState<string | null>(null);
 	const [energy, setEnergy] = useState(energyLabels[0]);
 	const [pickIndex, setPickIndex] = useState(0);
 	const [theme, setTheme] = useState<ThemeName>(() => loadTheme());
 	const [toast, setToast] = useState("");
+	const [lastDiscoveryMoodBookId, setLastDiscoveryMoodBookId] = useState<
+		string | null
+	>(null);
 	const [focusedReadingId, setFocusedReadingId] = useState<string | null>(() =>
 		loadFocusedReadingId(),
 	);
@@ -172,11 +182,18 @@ export function LittleShelfApp() {
 		toastTimerRef.current = window.setTimeout(() => setToast(""), 2200);
 	}
 
-	function openAddBook() {
+	function openAddBook(status: BookStatus = "want") {
 		setActiveTab("Shelf");
-		setDraft(blankDraft);
+		setDraft({ ...blankDraft, status });
 		setEditingId(null);
 		setIsBookSheetOpen(true);
+	}
+
+	function replaceBooks(nextBooks: Book[]) {
+		setBooks(nextBooks);
+		notify(
+			`Imported ${nextBooks.length} ${nextBooks.length === 1 ? "book" : "books"}`,
+		);
 	}
 
 	function closeBookSheet() {
@@ -258,9 +275,11 @@ export function LittleShelfApp() {
 			return;
 		}
 
+		const id = crypto.randomUUID();
+
 		setBooks((current) => [
 			{
-				id: crypto.randomUUID(),
+				id,
 				title: result.title,
 				author: result.author,
 				coverUrl: result.coverUrl,
@@ -271,7 +290,12 @@ export function LittleShelfApp() {
 			},
 			...current,
 		]);
+		setLastDiscoveryMoodBookId(id);
 		notify("Saved to Want");
+	}
+
+	function updateBookMoods(id: string, moodTags: MoodTag[]) {
+		updateBook(id, { moodTags });
 	}
 
 	function editBook(book: Book) {
@@ -332,8 +356,16 @@ export function LittleShelfApp() {
 				<div className="flex shrink-0 items-center gap-2">
 					<ThemeChooser theme={theme} onTheme={setTheme} />
 					<button
+						aria-label="Open settings"
+						className="tap rounded-full border border-[var(--theme-line)] bg-paper/70 px-3 py-2.5 text-sm font-bold text-sage shadow-soft"
+						onClick={() => setIsSettingsOpen(true)}
+						type="button"
+					>
+						<Settings className="size-4" />
+					</button>
+					<button
 						className="tap rounded-full bg-burgundy px-4 py-2.5 text-sm font-bold text-paper shadow-soft"
-						onClick={openAddBook}
+						onClick={() => openAddBook()}
 						type="button"
 					>
 						<Plus className="mr-1 inline size-4" /> Add
@@ -345,7 +377,8 @@ export function LittleShelfApp() {
 				<NowScreen
 					hasAnyBooks={books.length > 0}
 					books={orderedReadingBooks}
-					onAdd={openAddBook}
+					onAdd={() => openAddBook("reading")}
+					onFinish={(book) => changeStatus(book, "finished")}
 					onFocus={setFocusedReadingId}
 					onPick={() => setActiveTab("Pick")}
 					onUpdate={updateBook}
@@ -360,7 +393,7 @@ export function LittleShelfApp() {
 					}
 					onEdit={editBook}
 					onNotify={notify}
-					onOpenAdd={openAddBook}
+					onOpenAdd={() => openAddBook()}
 				/>
 			)}
 			{activeTab === "Pick" && (
@@ -368,13 +401,17 @@ export function LittleShelfApp() {
 					book={pickedBook}
 					energy={energy}
 					hasAnyBooks={books.length > 0}
-					onAdd={openAddBook}
+					onAdd={() => openAddBook()}
 					onEnergy={(value) => {
 						setEnergy(value);
 						setPickIndex(0);
 					}}
 					onSkip={() => setPickIndex((value) => value + 1)}
 					onSaveDiscovery={saveDiscovery}
+					onUpdateDiscoveryMoods={updateBookMoods}
+					savedDiscoveryBook={
+						books.find((book) => book.id === lastDiscoveryMoodBookId) ?? null
+					}
 					savedTitles={books.map((savedBook) => savedBook.title)}
 				/>
 			)}
@@ -382,7 +419,7 @@ export function LittleShelfApp() {
 				<JournalScreen
 					books={finishedBooks}
 					hasAnyBooks={books.length > 0}
-					onAdd={openAddBook}
+					onAdd={() => openAddBook()}
 					onNotify={notify}
 					onUpdate={updateBook}
 				/>
@@ -392,6 +429,7 @@ export function LittleShelfApp() {
 				<div className="grid grid-cols-4 gap-1">
 					{tabs.map((tab) => (
 						<button
+							aria-current={activeTab === tab ? "page" : undefined}
 							className={`tap rounded-2xl px-2 py-3 text-xs font-bold ${activeTab === tab ? "bg-sage text-paper" : "text-muted"}`}
 							key={tab}
 							onClick={() => setActiveTab(tab)}
@@ -411,6 +449,15 @@ export function LittleShelfApp() {
 					onCancel={closeBookSheet}
 					onChangeDraft={setDraft}
 					onSave={saveDraft}
+				/>
+			)}
+
+			{isSettingsOpen && (
+				<SettingsSheet
+					books={books}
+					onClose={() => setIsSettingsOpen(false)}
+					onImport={replaceBooks}
+					onNotify={notify}
 				/>
 			)}
 
@@ -434,6 +481,7 @@ function NowScreen({
 	hasAnyBooks,
 	books,
 	onAdd,
+	onFinish,
 	onFocus,
 	onPick,
 	onUpdate,
@@ -441,6 +489,7 @@ function NowScreen({
 	hasAnyBooks: boolean;
 	books: Book[];
 	onAdd: () => void;
+	onFinish: (book: Book) => void;
 	onFocus: (bookId: string) => void;
 	onPick: () => void;
 	onUpdate: (id: string, updates: Partial<Book>) => void;
@@ -489,6 +538,7 @@ function NowScreen({
 				0,
 			)
 		: null;
+	const isReadyToFinish = Boolean(featuredBook.progress && progress >= 100);
 
 	function updateProgress(book: Book, currentPage: number) {
 		if (!book.progress) return;
@@ -575,6 +625,15 @@ function NowScreen({
 										}
 									/>
 								</label>
+								{isReadyToFinish && (
+									<button
+										className="tap mt-4 rounded-full bg-burgundy px-5 py-3 text-sm font-bold text-paper"
+										onClick={() => onFinish(featuredBook)}
+										type="button"
+									>
+										Finish book
+									</button>
+								)}
 							</>
 						)}
 						<label className="mt-5 block text-sm font-bold text-ink">
@@ -621,6 +680,71 @@ function NowScreen({
 			)}
 		</section>
 	);
+}
+
+function useDialogEffects({
+	isOpen,
+	onClose,
+}: {
+	isOpen: boolean;
+	onClose: () => void;
+}) {
+	const dialogRef = useRef<HTMLElement | null>(null);
+	const initialFocusRef = useRef<HTMLElement | null>(null);
+
+	useEffect(() => {
+		if (!isOpen) return;
+		const previousActiveElement = document.activeElement as HTMLElement | null;
+		const previousOverflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+
+		requestAnimationFrame(() => {
+			(
+				initialFocusRef.current ?? getFocusableElements(dialogRef.current)[0]
+			)?.focus();
+		});
+
+		function handleKeyDown(event: KeyboardEvent) {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				onClose();
+				return;
+			}
+
+			if (event.key !== "Tab") return;
+			const focusableElements = getFocusableElements(dialogRef.current);
+			if (focusableElements.length === 0) return;
+			const firstElement = focusableElements[0];
+			const lastElement = focusableElements[focusableElements.length - 1];
+
+			if (event.shiftKey && document.activeElement === firstElement) {
+				event.preventDefault();
+				lastElement.focus();
+			} else if (!event.shiftKey && document.activeElement === lastElement) {
+				event.preventDefault();
+				firstElement.focus();
+			}
+		}
+
+		document.addEventListener("keydown", handleKeyDown);
+
+		return () => {
+			document.removeEventListener("keydown", handleKeyDown);
+			document.body.style.overflow = previousOverflow;
+			previousActiveElement?.focus();
+		};
+	}, [isOpen, onClose]);
+
+	return { dialogRef, initialFocusRef };
+}
+
+function getFocusableElements(container: HTMLElement | null) {
+	if (!container) return [];
+	return Array.from(
+		container.querySelectorAll<HTMLElement>(
+			'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+		),
+	).filter((element) => !element.hasAttribute("hidden"));
 }
 
 function CurrentReadCard({
@@ -695,16 +819,27 @@ function ShelfScreen(props: {
 }) {
 	const [query, setQuery] = useState("");
 	const [filter, setFilter] = useState<ShelfFilter>("all");
+	const [moodFilter, setMoodFilter] = useState<MoodTag | "all">("all");
+	const [filtersOpen, setFiltersOpen] = useState(false);
 	const sections = ["reading", "want", "finished", "paused"] as BookStatus[];
 	const normalizedQuery = query.trim().toLowerCase();
 	const foundMeowshroom = normalizedQuery.includes("meowshroom");
-	const isFiltered = normalizedQuery.length > 0 || filter !== "all";
+	const isFiltered =
+		normalizedQuery.length > 0 || filter !== "all" || moodFilter !== "all";
+	const activeFilterSummary = [
+		filter !== "all" ? statusLabels[filter] : null,
+		moodFilter !== "all" ? moodFilter : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
 	const filteredBooks = props.books.filter((book) => {
 		const matchesQuery = normalizedQuery
 			? `${book.title} ${book.author}`.toLowerCase().includes(normalizedQuery)
 			: true;
 		const matchesStatus = filter === "all" ? true : book.status === filter;
-		return matchesQuery && matchesStatus;
+		const matchesMood =
+			moodFilter === "all" ? true : book.moodTags.includes(moodFilter);
+		return matchesQuery && matchesStatus && matchesMood;
 	});
 
 	function deleteBook(id: string) {
@@ -746,7 +881,7 @@ function ShelfScreen(props: {
 				/>
 			) : (
 				<>
-					<div className="surface p-4">
+					<div className="surface p-4 sm:p-5">
 						<label className="grid gap-2 text-sm font-bold text-ink">
 							Find a book
 							<div className="flex min-h-12 items-center gap-2 rounded-2xl border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] px-3 focus-within:ring-3 focus-within:ring-[var(--theme-accent-soft)]">
@@ -759,17 +894,64 @@ function ShelfScreen(props: {
 								/>
 							</div>
 						</label>
-						<div className="mt-3 flex flex-wrap gap-2">
-							{(["all", ...sections] as ShelfFilter[]).map((item) => (
-								<button
-									className={`tap rounded-full px-3.5 py-2 text-sm font-bold ${filter === item ? "bg-sage text-paper" : "border border-[var(--theme-line)] text-muted"}`}
-									key={item}
-									onClick={() => setFilter(item)}
-									type="button"
-								>
-									{item === "all" ? "All" : statusLabels[item]}
-								</button>
-							))}
+						<div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--theme-line)] pt-3 sm:hidden">
+							<div>
+								<p className="text-xs font-bold uppercase tracking-[0.2em] text-muted">
+									Filters
+								</p>
+								<p className="mt-1 text-xs text-muted">
+									{activeFilterSummary || "All books"}
+								</p>
+							</div>
+							<button
+								aria-expanded={filtersOpen}
+								className="tap rounded-full bg-[var(--theme-accent-soft)] px-4 py-2 text-sm font-bold text-sage"
+								onClick={() => setFiltersOpen((value) => !value)}
+								type="button"
+							>
+								Filter shelf
+							</button>
+						</div>
+						<div className={`${filtersOpen ? "grid" : "hidden"} gap-3 sm:grid`}>
+							<div className="chip-list mt-3">
+								{(["all", ...sections] as ShelfFilter[]).map((item) => (
+									<button
+										aria-pressed={filter === item}
+										className={`chip ${filter === item ? "chip-on" : ""}`}
+										key={item}
+										onClick={() => setFilter(item)}
+										type="button"
+									>
+										{item === "all" ? "All" : statusLabels[item]}
+									</button>
+								))}
+							</div>
+							<div className="mt-4 border-t border-[var(--theme-line)] pt-3">
+								<p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-muted">
+									Mood filter
+								</p>
+								<div className="chip-list">
+									<button
+										aria-pressed={moodFilter === "all"}
+										className={`chip ${moodFilter === "all" ? "chip-on" : ""}`}
+										onClick={() => setMoodFilter("all")}
+										type="button"
+									>
+										All moods
+									</button>
+									{moodTags.map((tag) => (
+										<button
+											aria-pressed={moodFilter === tag}
+											className={`chip ${moodFilter === tag ? "chip-on" : ""}`}
+											key={tag}
+											onClick={() => setMoodFilter(tag)}
+											type="button"
+										>
+											{tag}
+										</button>
+									))}
+								</div>
+							</div>
 						</div>
 					</div>
 
@@ -792,6 +974,7 @@ function ShelfScreen(props: {
 									onClick={() => {
 										setQuery("");
 										setFilter("all");
+										setMoodFilter("all");
 									}}
 									type="button"
 								>
@@ -817,8 +1000,8 @@ function ShelfScreen(props: {
 								</p>
 							) : (
 								<p className="rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-5 text-sm text-muted">
-									No books match that search. Try a title, author, or another
-									status.
+									No books match that search. Try a title, author, status, or
+									mood.
 								</p>
 							)}
 						</section>
@@ -906,6 +1089,132 @@ function MeowshroomNote() {
 	);
 }
 
+function SettingsSheet({
+	books,
+	onClose,
+	onImport,
+	onNotify,
+}: {
+	books: Book[];
+	onClose: () => void;
+	onImport: (books: Book[]) => void;
+	onNotify: (message: string) => void;
+}) {
+	const [importMessage, setImportMessage] = useState("");
+	const { dialogRef, initialFocusRef } = useDialogEffects({
+		isOpen: true,
+		onClose,
+	});
+
+	function exportBackup() {
+		const backup = serializeShelfBackup(books);
+		const blob = new Blob([backup], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `little-shelf-backup-${new Date().toISOString().slice(0, 10)}.json`;
+		link.click();
+		URL.revokeObjectURL(url);
+		onNotify("Backup exported");
+	}
+
+	async function importBackup(file?: File) {
+		if (!file) return;
+		const text = await file.text();
+		const result = parseBooksJson(text);
+
+		if (!result.ok) {
+			setImportMessage(result.message);
+			return;
+		}
+
+		onImport(result.books);
+		setImportMessage(
+			`Ready. Your shelf now has ${result.books.length} ${result.books.length === 1 ? "book" : "books"}.`,
+		);
+	}
+
+	return (
+		<div className="fixed inset-0 z-30 flex items-end bg-ink/35 px-3 pt-12 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6">
+			<button
+				aria-label="Close settings"
+				className="absolute inset-0 cursor-default"
+				onClick={onClose}
+				type="button"
+			/>
+			<section
+				aria-labelledby="settings-title"
+				aria-modal="true"
+				className="surface soft-scroll relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[1.75rem] p-5 sm:max-w-xl sm:rounded-[1.75rem] sm:p-6"
+				ref={dialogRef}
+				role="dialog"
+			>
+				<div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-ink/15 sm:hidden" />
+				<div className="flex items-start justify-between gap-4">
+					<div>
+						<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
+							Shelf keeping
+						</p>
+						<h2
+							className="mt-1 font-serif text-3xl leading-none text-ink"
+							id="settings-title"
+						>
+							Back up your shelf
+						</h2>
+						<p className="mt-2 text-sm leading-6 text-muted">
+							Your books live on this device. Export a copy before clearing
+							browser data or moving phones.
+						</p>
+					</div>
+					<button
+						className="tap rounded-full border border-[var(--theme-line)] px-4 py-2 text-sm font-bold text-ink"
+						onClick={onClose}
+						ref={(element) => {
+							initialFocusRef.current = element;
+						}}
+						type="button"
+					>
+						Close
+					</button>
+				</div>
+
+				<div className="mt-5 grid gap-3">
+					<button
+						className="tap rounded-[1.25rem] bg-burgundy px-5 py-3 text-left font-bold text-paper"
+						onClick={exportBackup}
+						type="button"
+					>
+						Export backup
+						<span className="mt-1 block text-xs font-semibold text-paper/75">
+							Download {books.length} {books.length === 1 ? "book" : "books"} as
+							JSON.
+						</span>
+					</button>
+
+					<label className="rounded-[1.25rem] border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] p-4 text-sm font-bold text-ink">
+						Replace shelf from backup
+						<span className="mt-1 block text-xs font-semibold leading-5 text-muted">
+							This replaces the books on this device. Export first if you want
+							to keep the current shelf.
+						</span>
+						<input
+							accept="application/json,.json"
+							className="field mt-3"
+							type="file"
+							onChange={(event) => importBackup(event.target.files?.[0])}
+						/>
+					</label>
+					{importMessage && (
+						<p className="rounded-2xl bg-[var(--theme-accent-soft)] px-4 py-3 text-sm font-bold text-sage">
+							{importMessage}
+						</p>
+					)}
+				</div>
+			</section>
+		</div>
+	);
+}
+
 function BookSheet({
 	draft,
 	isEditing,
@@ -930,6 +1239,10 @@ function BookSheet({
 	const searchRequestIdRef = useRef(0);
 	const detailsRef = useRef<HTMLDivElement | null>(null);
 	const titleInputRef = useRef<HTMLInputElement | null>(null);
+	const { dialogRef, initialFocusRef } = useDialogEffects({
+		isOpen: true,
+		onClose: onCancel,
+	});
 	const titleError = hasTriedSave && !draft.title.trim();
 	const authorError = hasTriedSave && !draft.author.trim();
 	const canSave = Boolean(draft.title.trim() && draft.author.trim());
@@ -1061,8 +1374,10 @@ function BookSheet({
 				type="button"
 			/>
 			<section
+				aria-labelledby="book-sheet-title"
 				aria-modal="true"
-				className="surface relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[1.75rem] p-5 sm:max-w-2xl sm:rounded-[1.75rem] sm:p-6"
+				className="surface soft-scroll relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[1.75rem] p-5 sm:max-w-2xl sm:rounded-[1.75rem] sm:p-6"
+				ref={dialogRef}
 				role="dialog"
 			>
 				<div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-ink/15 sm:hidden" />
@@ -1071,13 +1386,19 @@ function BookSheet({
 						<p className="text-sm font-bold text-sage">
 							{isEditing ? "Make it feel right" : "A new book for the shelf"}
 						</p>
-						<h2 className="mt-1 font-serif text-2xl text-ink">
+						<h2
+							className="mt-1 font-serif text-2xl text-ink"
+							id="book-sheet-title"
+						>
 							{isEditing ? "Edit book" : "Add a book"}
 						</h2>
 					</div>
 					<button
 						className="tap rounded-full border border-ink/15 px-4 py-2 text-sm font-bold text-ink"
 						onClick={onCancel}
+						ref={(element) => {
+							initialFocusRef.current = element;
+						}}
 						type="button"
 					>
 						Close
@@ -1163,6 +1484,8 @@ function BookSheet({
 										</span>
 										<span className="mt-1 block text-xs text-muted">
 											{result.author}
+											{result.year ? `, ${result.year}` : ""}
+											{result.pageCount ? ` · ${result.pageCount} pages` : ""}
 										</span>
 										<span className="mt-1 block text-xs font-bold text-sage">
 											Use this book
@@ -1281,6 +1604,7 @@ function BookSheet({
 					<div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
 						{coverColorOptions.map((color) => (
 							<button
+								aria-pressed={draft.coverColor === color.value}
 								className={`tap flex items-center gap-3 rounded-2xl border px-3 py-2 text-left text-sm font-bold ${draft.coverColor === color.value ? "border-sage bg-[var(--theme-accent-soft)] text-ink" : "border-[var(--theme-line)] bg-[var(--theme-surface-muted)] text-muted"}`}
 								key={color.value}
 								onClick={() =>
@@ -1298,9 +1622,10 @@ function BookSheet({
 						))}
 					</div>
 				</div>
-				<div className="mt-4 flex flex-wrap gap-2">
+				<div className="chip-list mt-4">
 					{moodTags.map((tag) => (
 						<button
+							aria-pressed={draft.moodTags.includes(tag)}
 							className={`chip ${draft.moodTags.includes(tag) ? "chip-on" : ""}`}
 							key={tag}
 							onClick={() =>
@@ -1349,6 +1674,8 @@ function PickScreen({
 	onEnergy,
 	onSaveDiscovery,
 	onSkip,
+	onUpdateDiscoveryMoods,
+	savedDiscoveryBook,
 	savedTitles,
 }: {
 	book?: Book;
@@ -1358,6 +1685,8 @@ function PickScreen({
 	onEnergy: (energy: string) => void;
 	onSaveDiscovery: (result: OpenLibraryResult) => void;
 	onSkip: () => void;
+	onUpdateDiscoveryMoods: (bookId: string, moodTags: MoodTag[]) => void;
+	savedDiscoveryBook: Book | null;
 	savedTitles: string[];
 }) {
 	const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>("mood");
@@ -1372,6 +1701,16 @@ function PickScreen({
 	const discoverySubject = getDiscoverySubject(energy, book);
 	const canDiscoverByAuthor = Boolean(book?.author);
 	const normalizedSavedTitles = new Set(savedTitles.map(normalizeBookTitle));
+
+	function toggleDiscoveryMood(tag: MoodTag) {
+		if (!savedDiscoveryBook) return;
+		onUpdateDiscoveryMoods(
+			savedDiscoveryBook.id,
+			savedDiscoveryBook.moodTags.includes(tag)
+				? savedDiscoveryBook.moodTags.filter((item) => item !== tag)
+				: [...savedDiscoveryBook.moodTags, tag],
+		);
+	}
 
 	async function discoverBooks(mode: DiscoveryMode) {
 		setDiscoveryMode(mode);
@@ -1429,6 +1768,7 @@ function PickScreen({
 			<div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 				{energyLabels.map((option) => (
 					<button
+						aria-pressed={energy === option}
 						className={`tap rounded-2xl px-4 py-3 text-left text-sm font-bold ${energy === option ? "bg-sage text-paper" : "surface text-ink shadow-none"}`}
 						key={option}
 						onClick={() => onEnergy(option)}
@@ -1504,8 +1844,9 @@ function PickScreen({
 							until you decide to add one yourself.
 						</p>
 					</div>
-					<div className="flex flex-wrap gap-2">
+					<div className="chip-list">
 						<button
+							aria-pressed={discoveryMode === "mood"}
 							className={`tap rounded-full px-4 py-2.5 text-sm font-bold ${discoveryMode === "mood" ? "bg-sage text-paper" : "border border-[var(--theme-line)] text-muted"}`}
 							disabled={isDiscovering}
 							onClick={() => discoverBooks("mood")}
@@ -1514,6 +1855,7 @@ function PickScreen({
 							Try {discoverySubject.label}
 						</button>
 						<button
+							aria-pressed={discoveryMode === "author"}
 							className={`tap rounded-full px-4 py-2.5 text-sm font-bold ${discoveryMode === "author" ? "bg-sage text-paper" : "border border-[var(--theme-line)] text-muted"}`}
 							disabled={isDiscovering || !canDiscoverByAuthor}
 							onClick={() => discoverBooks("author")}
@@ -1533,6 +1875,33 @@ function PickScreen({
 					<p className="mt-4 rounded-2xl border border-dashed border-[var(--theme-line)] px-4 py-3 text-sm text-muted">
 						{discoveryError}
 					</p>
+				)}
+				{savedDiscoveryBook && (
+					<div className="mt-4 rounded-[1.35rem] border border-[var(--theme-line)] bg-paper/60 p-4">
+						<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
+							Saved to Want
+						</p>
+						<h4 className="mt-1 font-serif text-xl leading-tight text-ink">
+							Add a mood for {savedDiscoveryBook.title}?
+						</h4>
+						<p className="mt-1 text-xs leading-5 text-muted">
+							Optional, but it helps Pick understand why this book belongs on
+							the shelf.
+						</p>
+						<div className="chip-list mt-3">
+							{moodTags.map((tag) => (
+								<button
+									aria-pressed={savedDiscoveryBook.moodTags.includes(tag)}
+									className={`chip ${savedDiscoveryBook.moodTags.includes(tag) ? "chip-on" : ""}`}
+									key={tag}
+									onClick={() => toggleDiscoveryMood(tag)}
+									type="button"
+								>
+									{tag}
+								</button>
+							))}
+						</div>
+					</div>
 				)}
 				{discoveries.length > 0 && !isDiscovering && (
 					<div className="mt-4 grid gap-3 lg:grid-cols-3">
@@ -1830,6 +2199,10 @@ function FinishReflectionSheet({
 	onUpdate: (id: string, updates: Partial<Book>) => void;
 }) {
 	const reflection = book.reflection ?? emptyReflection;
+	const { dialogRef, initialFocusRef } = useDialogEffects({
+		isOpen: true,
+		onClose: () => onClose(false),
+	});
 
 	function updateReflection(updates: Partial<typeof reflection>) {
 		onUpdate(book.id, {
@@ -1849,8 +2222,10 @@ function FinishReflectionSheet({
 				type="button"
 			/>
 			<section
+				aria-labelledby="finish-title"
 				aria-modal="true"
-				className="surface relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[1.75rem] p-5 sm:max-w-2xl sm:rounded-[1.75rem] sm:p-6"
+				className="surface soft-scroll relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[1.75rem] p-5 sm:max-w-2xl sm:rounded-[1.75rem] sm:p-6"
+				ref={dialogRef}
 				role="dialog"
 			>
 				<div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-ink/15 sm:hidden" />
@@ -1858,7 +2233,10 @@ function FinishReflectionSheet({
 					<BookCover book={book} />
 					<div>
 						<p className="text-sm font-bold text-sage">Finished</p>
-						<h2 className="mt-1 font-serif text-3xl leading-none text-ink">
+						<h2
+							className="mt-1 font-serif text-3xl leading-none text-ink"
+							id="finish-title"
+						>
 							How did it leave you?
 						</h2>
 						<p className="mt-2 text-sm leading-6 text-muted">
@@ -1918,6 +2296,9 @@ function FinishReflectionSheet({
 					<button
 						className="tap rounded-full bg-burgundy px-5 py-3 font-bold text-paper"
 						onClick={() => onClose(true)}
+						ref={(element) => {
+							initialFocusRef.current = element;
+						}}
 						type="button"
 					>
 						Save memory
@@ -2205,6 +2586,7 @@ function ThemeChooser({
 			{themes.map((item) => (
 				<button
 					aria-label={`Use ${item} theme`}
+					aria-pressed={theme === item}
 					className={`h-8 w-8 rounded-full text-[0.65rem] font-bold capitalize ${theme === item ? "bg-sage text-paper" : "text-muted"}`}
 					key={item}
 					onClick={() => onTheme(item)}
@@ -2215,18 +2597,6 @@ function ThemeChooser({
 			))}
 		</fieldset>
 	);
-}
-
-function loadBooks() {
-	if (typeof window === "undefined") return [];
-	const stored = window.localStorage.getItem(storageKey);
-	if (!stored) return [];
-	try {
-		const parsed = JSON.parse(stored) as Book[];
-		return parsed;
-	} catch {
-		return [];
-	}
 }
 
 function getProgressPercent(book: Book) {
@@ -2316,7 +2686,10 @@ async function searchOpenLibrary(query: string): Promise<OpenLibraryResult[]> {
 			};
 		})
 		.filter((result): result is OpenLibraryResult => result !== null)
-		.sort((a, b) => scoreOpenLibraryResult(b) - scoreOpenLibraryResult(a))
+		.sort(
+			(a, b) =>
+				scoreOpenLibraryResult(b, query) - scoreOpenLibraryResult(a, query),
+		)
 		.slice(0, 6);
 }
 
@@ -2445,13 +2818,27 @@ function getPreferredOpenLibraryAuthor(doc: OpenLibraryDoc) {
 	);
 }
 
-function scoreOpenLibraryResult(result: OpenLibraryResult) {
+function scoreOpenLibraryResult(result: OpenLibraryResult, query: string) {
 	let score = 0;
+	const normalizedQuery = normalizeBookTitle(query);
+	const normalizedTitle = normalizeBookTitle(result.title);
 	if (isLatinText(result.title)) score += 8;
 	if (isLatinText(result.author)) score += 4;
+	if (normalizedTitle === normalizedQuery) score += 12;
+	if (normalizedQuery && normalizedTitle.includes(normalizedQuery)) score += 6;
+	if (queryWordOverlap(normalizedTitle, normalizedQuery) >= 0.5) score += 3;
 	if (result.coverUrl) score += 1;
+	if (result.pageCount) score += 1;
 	if (result.year) score += 1;
 	return score;
+}
+
+function queryWordOverlap(title: string, query: string) {
+	const queryWords = query.split(" ").filter((word) => word.length > 2);
+	if (queryWords.length === 0) return 0;
+	const titleWords = new Set(title.split(" "));
+	const matches = queryWords.filter((word) => titleWords.has(word)).length;
+	return matches / queryWords.length;
 }
 
 function isLatinText(text: string) {
