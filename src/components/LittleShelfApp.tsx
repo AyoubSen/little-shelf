@@ -192,11 +192,9 @@ export function LittleShelfApp() {
 		async (
 			nextBooks: Book[],
 			{
-				expectedUpdatedAt = lastKnownCloudUpdatedAtRef.current,
 				isCurrent = () => true,
 				saveVersion,
 			}: {
-				expectedUpdatedAt?: string | null;
 				isCurrent?: () => boolean;
 				saveVersion?: number;
 			} = {},
@@ -208,7 +206,6 @@ export function LittleShelfApp() {
 				const result = await saveShelf({
 					data: {
 						books: nextBooks,
-						expectedUpdatedAt,
 					},
 				});
 
@@ -237,34 +234,6 @@ export function LittleShelfApp() {
 		[],
 	);
 
-	const forceMergeSaveToCloud = useCallback(
-		async (nextBooks: Book[], { isCurrent = () => true } = {}) => {
-			const latestShelf = await getShelf();
-			if (!isCurrent()) return;
-
-			if (!latestShelf.ok) {
-				setCloudStatus(
-					latestShelf.reason === "conflict" ? "conflict" : "error",
-				);
-				setCloudMessage(latestShelf.message);
-				return;
-			}
-
-			lastKnownCloudUpdatedAtRef.current = latestShelf.updatedAt;
-			const mergedBooks = mergeShelves(nextBooks, latestShelf.books);
-			if (!areBooksEqual(booksRef.current, mergedBooks)) {
-				skipNextAutoSaveRef.current = true;
-				setBooks(mergedBooks);
-			}
-
-			await saveBooksToCloud(mergedBooks, {
-				expectedUpdatedAt: latestShelf.updatedAt,
-				isCurrent,
-			});
-		},
-		[saveBooksToCloud],
-	);
-
 	const loadCloudShelf = useCallback(
 		async ({
 			isCurrent = () => true,
@@ -287,19 +256,27 @@ export function LittleShelfApp() {
 				}
 
 				lastKnownCloudUpdatedAtRef.current = result.updatedAt;
-				const mergedBooks = mergeShelves(booksRef.current, result.books);
-				const localChanged = !areBooksEqual(booksRef.current, mergedBooks);
-				const cloudNeedsMergedBooks = !areBooksEqual(result.books, mergedBooks);
+				const cloudBooks = sortBooksByAddedAt(dedupeBooks(result.books));
+				const localBooks = booksRef.current;
+				const shouldUploadLocalBooks =
+					cloudBooks.length === 0 && localBooks.length > 0;
+				const nextBooks = shouldUploadLocalBooks
+					? sortBooksByAddedAt(dedupeBooks(localBooks))
+					: cloudBooks;
+				const localChanged = !areBooksEqual(localBooks, nextBooks);
 
 				if (localChanged) {
 					skipNextAutoSaveRef.current = true;
-					setBooks(mergedBooks);
+					setBooks(nextBooks);
 				}
 
 				hasLoadedCloudShelfRef.current = true;
 
-				if (cloudNeedsMergedBooks) {
-					await forceMergeSaveToCloud(mergedBooks, { isCurrent });
+				if (
+					shouldUploadLocalBooks ||
+					!areBooksEqual(result.books, cloudBooks)
+				) {
+					await saveBooksToCloud(nextBooks, { isCurrent });
 					if (notifyWhenDone && isCurrent()) notify("Shelf synced");
 					return;
 				}
@@ -314,7 +291,7 @@ export function LittleShelfApp() {
 				setCloudMessage("Could not reach cloud sync. Try again in a moment.");
 			}
 		},
-		[forceMergeSaveToCloud, notify],
+		[notify, saveBooksToCloud],
 	);
 
 	const syncNow = useCallback(() => {
@@ -328,8 +305,14 @@ export function LittleShelfApp() {
 			window.clearTimeout(cloudSaveTimerRef.current);
 			cloudSaveTimerRef.current = null;
 		}
+
+		if (hasLoadedCloudShelfRef.current) {
+			saveBooksToCloud(booksRef.current).then(() => notify("Shelf synced"));
+			return;
+		}
+
 		loadCloudShelf({ notifyWhenDone: true });
-	}, [isLoaded, isSignedIn, loadCloudShelf, notify]);
+	}, [isLoaded, isSignedIn, loadCloudShelf, notify, saveBooksToCloud]);
 
 	useEffect(() => {
 		window.localStorage.setItem(storageKey, JSON.stringify(books));
@@ -764,16 +747,14 @@ function AuthControls({ cloudStatus }: { cloudStatus: CloudStatus }) {
 	);
 }
 
-function mergeShelves(localBooks: Book[], cloudBooks: Book[]) {
-	return dedupeBooks([...cloudBooks, ...localBooks]).sort(
-		(firstBook, secondBook) => {
-			return getBookTime(secondBook) - getBookTime(firstBook);
-		},
-	);
-}
-
 function areBooksEqual(firstBooks: Book[], secondBooks: Book[]) {
 	return JSON.stringify(firstBooks) === JSON.stringify(secondBooks);
+}
+
+function sortBooksByAddedAt(books: Book[]) {
+	return [...books].sort((firstBook, secondBook) => {
+		return getBookTime(secondBook) - getBookTime(firstBook);
+	});
 }
 
 function getBookTime(book: Book) {

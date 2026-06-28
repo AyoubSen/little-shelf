@@ -15,7 +15,6 @@ type ShelfResult =
 
 type SaveShelfInput = {
 	books: unknown;
-	expectedUpdatedAt?: string | null;
 };
 
 const tableName = "little_shelf_shelves";
@@ -71,7 +70,6 @@ export const saveShelf = createServerFn({ method: "POST" })
 	.validator(
 		(data: SaveShelfInput): SaveShelfInput => ({
 			books: data?.books ?? [],
-			expectedUpdatedAt: data?.expectedUpdatedAt ?? null,
 		}),
 	)
 	.handler(async ({ data }): Promise<ShelfResult> => {
@@ -94,35 +92,19 @@ export const saveShelf = createServerFn({ method: "POST" })
 		}
 
 		const books = normalizeBooks(data.books);
-		const expectedUpdatedAt = data.expectedUpdatedAt ?? null;
 
 		try {
 			await ensureShelfTable(sql);
 
-			const rows = expectedUpdatedAt
-				? await sql.query(
-						`update ${tableName}
-						 set books = $2::jsonb, updated_at = now()
-						 where user_id = $1 and updated_at = $3::timestamptz
-						 returning updated_at`,
-						[userId, JSON.stringify(books), expectedUpdatedAt],
-					)
-				: await sql.query(
-						`insert into ${tableName} (user_id, books, updated_at)
-						 values ($1, $2::jsonb, now())
-						 on conflict (user_id) do nothing
-						 returning updated_at`,
-						[userId, JSON.stringify(books)],
-					);
+			const rows = await sql.query(
+				`insert into ${tableName} (user_id, books, updated_at)
+				 values ($1, $2::jsonb, now())
+				 on conflict (user_id) do update
+				 set books = excluded.books, updated_at = now()
+				 returning updated_at`,
+				[userId, JSON.stringify(books)],
+			);
 			const row = rows[0] as { updated_at?: string | Date | null } | undefined;
-
-			if (!row) {
-				return {
-					ok: false,
-					message: "Cloud shelf changed. Sync again before saving.",
-					reason: "conflict",
-				};
-			}
 
 			return {
 				ok: true,
