@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	backupVersion,
+	dedupeBooks,
 	parseBooksJson,
 	serializeShelfBackup,
 } from "./bookStorage";
@@ -84,5 +85,50 @@ describe("bookStorage", () => {
 		const result = parseBooksJson(serialized);
 
 		expect(result.ok).toBe(true);
+	});
+
+	it("does not duplicate unique books while deduping", () => {
+		const books = dedupeBooks([
+			{
+				...rawBook,
+				moodTags: ["smart"],
+				status: "want",
+			},
+			{
+				...rawBook,
+				id: "book-2",
+				title: "Piranesi",
+				author: "Susanna Clarke",
+				moodTags: ["weird"],
+				status: "finished",
+			},
+		]);
+
+		expect(books).toHaveLength(2);
+	});
+
+	it("dedupes the same title and author with different ids", () => {
+		const books = dedupeBooks([
+			{
+				...rawBook,
+				id: "atomic-1",
+				title: "Atomic Habits",
+				author: "James Clear",
+				moodTags: [],
+				status: "finished",
+			},
+			{
+				...rawBook,
+				id: "atomic-2",
+				title: "Atomic Habits",
+				author: "James Clear",
+				coverUrl: "https://example.com/cover.jpg",
+				moodTags: ["smart"],
+				status: "finished",
+			},
+		]);
+
+		expect(books).toHaveLength(1);
+		expect(books[0]?.coverUrl).toBe("https://example.com/cover.jpg");
 	});
 });

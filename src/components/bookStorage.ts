@@ -83,23 +83,24 @@ export function normalizeBooks(value: unknown): Book[] {
 }
 
 export function dedupeBooks(books: Book[]) {
-	const booksByKey = new Map<string, Book>();
+	const booksById = new Map<string, Book>();
+	const booksByIdentity = new Map<string, Book>();
 
 	for (const book of books) {
-		const keys = [book.id, getBookIdentityKey(book)];
-		const existingBook = keys
-			.map((key) => booksByKey.get(key))
-			.find((candidate): candidate is Book => Boolean(candidate));
+		const identityKey = getBookIdentityKey(book);
+		const existingBook = [
+			booksById.get(book.id),
+			booksByIdentity.get(identityKey),
+		].find((candidate): candidate is Book => Boolean(candidate));
 		const nextBook = existingBook
 			? pickMoreCompleteBook(existingBook, book)
 			: book;
 
-		for (const key of keys) {
-			booksByKey.set(key, nextBook);
-		}
+		booksById.set(nextBook.id, nextBook);
+		booksByIdentity.set(getBookIdentityKey(nextBook), nextBook);
 	}
 
-	return Array.from(booksByKey.values());
+	return Array.from(new Set(booksByIdentity.values()));
 }
 
 function normalizeBook(value: unknown): Book | null {
