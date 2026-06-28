@@ -25,7 +25,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { getShelf, saveShelf } from "../server/shelf";
+import { getShelf, getShelfDiagnostics, saveShelf } from "../server/shelf";
 import {
 	type Book,
 	type BookStatus,
@@ -78,6 +78,17 @@ type CloudSyncDetails = {
 	lastSyncedAt: string | null;
 	onSyncNow: () => void;
 };
+
+type SyncDiagnostics =
+	| {
+			ok: true;
+			userId: string;
+			databaseHost: string;
+			databaseName: string;
+			bookCount: number;
+			updatedAt: string | null;
+	  }
+	| { ok: false; message: string };
 
 type BookDraft = {
 	title: string;
@@ -1380,6 +1391,8 @@ function SettingsSheet({
 	onNotify: (message: string) => void;
 }) {
 	const [importMessage, setImportMessage] = useState("");
+	const [diagnostics, setDiagnostics] = useState<SyncDiagnostics | null>(null);
+	const [isCheckingDiagnostics, setIsCheckingDiagnostics] = useState(false);
 	const { dialogRef, initialFocusRef } = useDialogEffects({
 		isOpen: true,
 		onClose,
@@ -1411,6 +1424,20 @@ function SettingsSheet({
 		setImportMessage(
 			`Ready. Your shelf now has ${result.books.length} ${result.books.length === 1 ? "book" : "books"}.`,
 		);
+	}
+
+	async function checkDiagnostics() {
+		setIsCheckingDiagnostics(true);
+		try {
+			const result = await getShelfDiagnostics();
+			setDiagnostics(
+				result.ok ? result : { ok: false, message: result.message },
+			);
+		} catch {
+			setDiagnostics({ ok: false, message: "Could not inspect sync details." });
+		} finally {
+			setIsCheckingDiagnostics(false);
+		}
 	}
 
 	const syncTone =
@@ -1498,6 +1525,68 @@ function SettingsSheet({
 							Sync now
 						</button>
 					</div>
+				</div>
+
+				<div className="mt-3 rounded-[1.25rem] border border-[var(--theme-line)] bg-paper/60 p-4">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						<div>
+							<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
+								Sync diagnostics
+							</p>
+							<p className="mt-1 text-xs leading-5 text-muted">
+								Use this to compare localhost and production. It only shows
+								non-secret IDs and database target info.
+							</p>
+						</div>
+						<button
+							className="tap rounded-full border border-[var(--theme-line)] px-4 py-2.5 text-sm font-bold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+							disabled={isCheckingDiagnostics}
+							onClick={checkDiagnostics}
+							type="button"
+						>
+							{isCheckingDiagnostics ? "Checking..." : "Check details"}
+						</button>
+					</div>
+					{diagnostics && (
+						<div className="mt-3 rounded-2xl bg-[var(--theme-surface-muted)] p-3 text-xs leading-5 text-muted">
+							{diagnostics.ok ? (
+								<dl className="grid gap-1">
+									<div className="flex justify-between gap-3">
+										<dt className="font-bold text-ink">User ID</dt>
+										<dd className="text-right font-mono">
+											{diagnostics.userId}
+										</dd>
+									</div>
+									<div className="flex justify-between gap-3">
+										<dt className="font-bold text-ink">DB host</dt>
+										<dd className="text-right font-mono">
+											{diagnostics.databaseHost}
+										</dd>
+									</div>
+									<div className="flex justify-between gap-3">
+										<dt className="font-bold text-ink">DB name</dt>
+										<dd className="text-right font-mono">
+											{diagnostics.databaseName}
+										</dd>
+									</div>
+									<div className="flex justify-between gap-3">
+										<dt className="font-bold text-ink">Cloud books</dt>
+										<dd>{diagnostics.bookCount}</dd>
+									</div>
+									<div className="flex justify-between gap-3">
+										<dt className="font-bold text-ink">Cloud updated</dt>
+										<dd>
+											{diagnostics.updatedAt
+												? formatShortDateTime(diagnostics.updatedAt)
+												: "No row yet"}
+										</dd>
+									</div>
+								</dl>
+							) : (
+								<p className="font-bold text-burgundy">{diagnostics.message}</p>
+							)}
+						</div>
+					)}
 				</div>
 
 				<div className="mt-3 grid gap-3">

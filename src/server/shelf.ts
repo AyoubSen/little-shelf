@@ -18,6 +18,21 @@ type SaveShelfInput = {
 	expectedUpdatedAt?: string | null;
 };
 
+type ShelfDiagnosticsResult =
+	| {
+			ok: true;
+			userId: string;
+			databaseHost: string;
+			databaseName: string;
+			bookCount: number;
+			updatedAt: string | null;
+	  }
+	| {
+			ok: false;
+			message: string;
+			reason?: "auth" | "config" | "database";
+	  };
+
 const tableName = "little_shelf_shelves";
 
 export const getShelf = createServerFn({ method: "GET" }).handler(
@@ -140,6 +155,60 @@ export const saveShelf = createServerFn({ method: "POST" })
 		}
 	});
 
+export const getShelfDiagnostics = createServerFn({ method: "GET" }).handler(
+	async (): Promise<ShelfDiagnosticsResult> => {
+		const userId = await getUserId();
+		if (!userId) {
+			return {
+				ok: false,
+				message: "Sign in to inspect cloud sync.",
+				reason: "auth",
+			};
+		}
+
+		const databaseUrl = process.env.DATABASE_URL;
+		if (!databaseUrl) {
+			return {
+				ok: false,
+				message: "DATABASE_URL is missing.",
+				reason: "config",
+			};
+		}
+
+		try {
+			const databaseInfo = getDatabaseInfo(databaseUrl);
+			const sql = neon(databaseUrl);
+			await ensureShelfTable(sql);
+			const rows = await sql.query(
+				`select jsonb_array_length(books) as book_count, updated_at
+				 from ${tableName}
+				 where user_id = $1`,
+				[userId],
+			);
+			const row = rows[0] as
+				| { book_count?: number | string; updated_at?: string | Date | null }
+				| undefined;
+
+			return {
+				ok: true,
+				userId,
+				databaseHost: databaseInfo.host,
+				databaseName: databaseInfo.name,
+				bookCount: row?.book_count ? Number(row.book_count) : 0,
+				updatedAt: row?.updated_at
+					? new Date(row.updated_at).toISOString()
+					: null,
+			};
+		} catch {
+			return {
+				ok: false,
+				message: "Could not inspect the shelf database.",
+				reason: "database",
+			};
+		}
+	},
+);
+
 async function getUserId() {
 	const authState = await auth();
 	return authState.isAuthenticated ? authState.userId : null;
@@ -148,6 +217,14 @@ async function getUserId() {
 function getDatabase() {
 	const databaseUrl = process.env.DATABASE_URL;
 	return databaseUrl ? neon(databaseUrl) : null;
+}
+
+function getDatabaseInfo(databaseUrl: string) {
+	const url = new URL(databaseUrl);
+	return {
+		host: url.host,
+		name: url.pathname.replace(/^\//, "") || "unknown",
+	};
 }
 
 async function ensureShelfTable(sql: ReturnType<typeof neon>) {
