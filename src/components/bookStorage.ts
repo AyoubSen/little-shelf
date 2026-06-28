@@ -77,7 +77,29 @@ export function parseBooksValue(value: unknown): ImportResult {
 
 export function normalizeBooks(value: unknown): Book[] {
 	if (!Array.isArray(value)) return [];
-	return value.map(normalizeBook).filter((book): book is Book => book !== null);
+	return dedupeBooks(
+		value.map(normalizeBook).filter((book): book is Book => book !== null),
+	);
+}
+
+export function dedupeBooks(books: Book[]) {
+	const booksByKey = new Map<string, Book>();
+
+	for (const book of books) {
+		const keys = [book.id, getBookIdentityKey(book)];
+		const existingBook = keys
+			.map((key) => booksByKey.get(key))
+			.find((candidate): candidate is Book => Boolean(candidate));
+		const nextBook = existingBook
+			? pickMoreCompleteBook(existingBook, book)
+			: book;
+
+		for (const key of keys) {
+			booksByKey.set(key, nextBook);
+		}
+	}
+
+	return Array.from(booksByKey.values());
 }
 
 function normalizeBook(value: unknown): Book | null {
@@ -176,4 +198,40 @@ function cryptoFallbackId(title: string, author: string) {
 		return crypto.randomUUID();
 	}
 	return `${title}-${author}-${Date.now()}`;
+}
+
+function pickMoreCompleteBook(firstBook: Book, secondBook: Book) {
+	return getBookScore(secondBook) >= getBookScore(firstBook)
+		? { ...firstBook, ...secondBook }
+		: { ...secondBook, ...firstBook };
+}
+
+function getBookScore(book: Book) {
+	return (
+		[
+			book.coverUrl,
+			book.coverColor,
+			book.startedAt,
+			book.finishedAt,
+			book.rating,
+			book.reflection?.feeling,
+			book.reflection?.quote,
+			book.reflection?.note,
+			book.progress?.totalPages,
+			book.progress?.currentPage,
+		].filter(Boolean).length + book.moodTags.length
+	);
+}
+
+function getBookIdentityKey(book: Book) {
+	return `${normalizeBookIdentityText(book.title)}::${normalizeBookIdentityText(book.author)}`;
+}
+
+function normalizeBookIdentityText(value: string) {
+	return value
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, " ")
+		.trim();
 }

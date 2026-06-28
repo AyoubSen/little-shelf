@@ -39,6 +39,7 @@ import {
 	statusLabels,
 } from "./bookData";
 import {
+	dedupeBooks,
 	loadBooks,
 	parseBooksJson,
 	serializeShelfBackup,
@@ -742,19 +743,11 @@ function AuthControls({ cloudStatus }: { cloudStatus: CloudStatus }) {
 }
 
 function mergeShelves(localBooks: Book[], cloudBooks: Book[]) {
-	const booksById = new Map<string, Book>();
-
-	for (const book of cloudBooks) {
-		booksById.set(book.id, book);
-	}
-
-	for (const book of localBooks) {
-		booksById.set(book.id, book);
-	}
-
-	return Array.from(booksById.values()).sort((firstBook, secondBook) => {
-		return getBookTime(secondBook) - getBookTime(firstBook);
-	});
+	return dedupeBooks([...cloudBooks, ...localBooks]).sort(
+		(firstBook, secondBook) => {
+			return getBookTime(secondBook) - getBookTime(firstBook);
+		},
+	);
 }
 
 function areBooksEqual(firstBooks: Book[], secondBooks: Book[]) {
