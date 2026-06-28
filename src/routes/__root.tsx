@@ -1,3 +1,4 @@
+import { ClerkProvider } from "@clerk/tanstack-react-start";
 import { createRootRoute, HeadContent, Scripts } from "@tanstack/react-router";
 import { useEffect } from "react";
 
@@ -89,8 +90,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 				<HeadContent />
 			</head>
 			<body className="font-sans antialiased selection:bg-burgundy/20">
-				<ServiceWorkerRegistration />
-				{children}
+				<ClerkProvider>
+					<ServiceWorkerRegistration />
+					{children}
+				</ClerkProvider>
 				<Scripts />
 			</body>
 		</html>

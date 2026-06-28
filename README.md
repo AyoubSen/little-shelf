@@ -1,4 +1,55 @@
-Welcome to your new TanStack Start app! 
+Little Shelf is a private reading diary and mood-based book picker.
+
+## Environment
+
+Clerk handles authentication and Neon stores the signed-in user's shelf. Add these values to `.env.local` for local development:
+
+```bash
+VITE_CLERK_PUBLISHABLE_KEY=...
+CLERK_SECRET_KEY=...
+VITE_CLERK_SIGN_IN_URL=/sign-in
+VITE_CLERK_SIGN_UP_URL=/sign-up
+VITE_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL=/
+VITE_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL=/
+DATABASE_URL=...
+```
+
+The app creates this Neon table automatically on first sync:
+
+```sql
+create table if not exists little_shelf_shelves (
+  user_id text primary key,
+  books jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+```
+
+## Production Checklist
+
+Add these environment variables to the production host:
+
+1. `VITE_CLERK_PUBLISHABLE_KEY`: production Clerk publishable key, usually `pk_live_...`.
+2. `CLERK_SECRET_KEY`: production Clerk secret key, usually `sk_live_...`.
+3. `VITE_CLERK_SIGN_IN_URL`: `/sign-in`.
+4. `VITE_CLERK_SIGN_UP_URL`: `/sign-up`.
+5. `VITE_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL`: `/`.
+6. `VITE_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL`: `/`.
+7. `DATABASE_URL`: Neon Postgres connection string. Prefer the pooled connection string if your host is serverless.
+
+In Clerk, add the production domain and allow these routes:
+
+```text
+https://your-domain.com
+https://your-domain.com/sign-in
+https://your-domain.com/sign-up
+```
+
+Before deploying, run:
+
+```bash
+npm run check
+npm run build
+```
 
 # Getting Started
 

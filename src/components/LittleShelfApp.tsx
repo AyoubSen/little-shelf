@@ -1,4 +1,11 @@
 import {
+	Show,
+	SignInButton,
+	SignUpButton,
+	UserButton,
+	useUser,
+} from "@clerk/tanstack-react-start";
+import {
 	BookOpen,
 	Dice5,
 	Library,
@@ -18,6 +25,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { getShelf, saveShelf } from "../server/shelf";
 import {
 	type Book,
 	type BookStatus,
@@ -45,6 +53,31 @@ const themes = ["paper", "moss", "plum", "night"] as const;
 type ThemeName = (typeof themes)[number];
 type ShelfFilter = "all" | BookStatus;
 type DiscoveryMode = "mood" | "author";
+type CloudStatus =
+	| "local"
+	| "loading"
+	| "saving"
+	| "synced"
+	| "conflict"
+	| "error";
+
+const cloudStatusLabels: Record<CloudStatus, string> = {
+	local: "Local only",
+	loading: "Loading cloud shelf",
+	saving: "Saving",
+	synced: "Cloud synced",
+	conflict: "Sync needed",
+	error: "Sync paused",
+};
+
+type CloudSyncDetails = {
+	isLoaded: boolean;
+	isSignedIn: boolean;
+	status: CloudStatus;
+	message: string;
+	lastSyncedAt: string | null;
+	onSyncNow: () => void;
+};
 
 type BookDraft = {
 	title: string;
@@ -115,6 +148,7 @@ const blankDraft: BookDraft = {
 };
 
 export function LittleShelfApp() {
+	const { isLoaded, isSignedIn } = useUser();
 	const [books, setBooks] = useState<Book[]>(() => loadBooks());
 	const [activeTab, setActiveTab] = useState<Tab>("Now");
 	const [draft, setDraft] = useState<BookDraft>(blankDraft);
@@ -132,10 +166,143 @@ export function LittleShelfApp() {
 	const [focusedReadingId, setFocusedReadingId] = useState<string | null>(() =>
 		loadFocusedReadingId(),
 	);
+	const [cloudStatus, setCloudStatus] = useState<CloudStatus>("local");
+	const [cloudMessage, setCloudMessage] = useState(
+		"Sign in to back up this shelf across devices.",
+	);
+	const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 	const toastTimerRef = useRef<number | null>(null);
+	const booksRef = useRef<Book[]>(books);
+	const hasLoadedCloudShelfRef = useRef(false);
+	const lastKnownCloudUpdatedAtRef = useRef<string | null>(null);
+	const cloudSaveTimerRef = useRef<number | null>(null);
+	const cloudSaveVersionRef = useRef(0);
+	const skipNextAutoSaveRef = useRef(false);
+
+	const notify = useCallback((message: string) => {
+		setToast(message);
+		if (toastTimerRef.current) {
+			window.clearTimeout(toastTimerRef.current);
+		}
+		toastTimerRef.current = window.setTimeout(() => setToast(""), 2200);
+	}, []);
+
+	const saveBooksToCloud = useCallback(
+		async (
+			nextBooks: Book[],
+			{
+				isCurrent = () => true,
+				saveVersion,
+			}: { isCurrent?: () => boolean; saveVersion?: number } = {},
+		) => {
+			setCloudStatus("saving");
+			setCloudMessage("Saving your latest shelf changes...");
+
+			try {
+				const result = await saveShelf({
+					data: {
+						books: nextBooks,
+						expectedUpdatedAt: lastKnownCloudUpdatedAtRef.current,
+					},
+				});
+
+				if (!isCurrent()) return;
+				if (saveVersion && cloudSaveVersionRef.current !== saveVersion) return;
+
+				if (!result.ok) {
+					setCloudStatus(result.reason === "conflict" ? "conflict" : "error");
+					setCloudMessage(result.message);
+					return;
+				}
+
+				lastKnownCloudUpdatedAtRef.current = result.updatedAt;
+				setCloudStatus("synced");
+				setCloudMessage("Cloud backup is up to date.");
+				setLastSyncedAt(new Date().toISOString());
+			} catch {
+				if (!isCurrent()) return;
+				if (saveVersion && cloudSaveVersionRef.current !== saveVersion) return;
+				setCloudStatus("error");
+				setCloudMessage(
+					"Could not save to cloud. Your local shelf is still here.",
+				);
+			}
+		},
+		[],
+	);
+
+	const loadCloudShelf = useCallback(
+		async ({
+			isCurrent = () => true,
+			notifyWhenDone = false,
+		}: {
+			isCurrent?: () => boolean;
+			notifyWhenDone?: boolean;
+		} = {}) => {
+			setCloudStatus("loading");
+			setCloudMessage("Checking your cloud shelf...");
+
+			try {
+				const result = await getShelf();
+				if (!isCurrent()) return;
+
+				if (!result.ok) {
+					setCloudStatus(result.reason === "conflict" ? "conflict" : "error");
+					setCloudMessage(result.message);
+					return;
+				}
+
+				lastKnownCloudUpdatedAtRef.current = result.updatedAt;
+				const mergedBooks = mergeShelves(booksRef.current, result.books);
+				const localChanged = !areBooksEqual(booksRef.current, mergedBooks);
+				const cloudNeedsMergedBooks = !areBooksEqual(result.books, mergedBooks);
+
+				if (localChanged) {
+					skipNextAutoSaveRef.current = true;
+					setBooks(mergedBooks);
+				}
+
+				hasLoadedCloudShelfRef.current = true;
+
+				if (cloudNeedsMergedBooks) {
+					await saveBooksToCloud(mergedBooks, { isCurrent });
+					if (notifyWhenDone && isCurrent()) notify("Shelf synced");
+					return;
+				}
+
+				setCloudStatus("synced");
+				setCloudMessage("Cloud backup is up to date.");
+				setLastSyncedAt(new Date().toISOString());
+				if (notifyWhenDone) notify("Shelf already synced");
+			} catch {
+				if (!isCurrent()) return;
+				setCloudStatus("error");
+				setCloudMessage("Could not reach cloud sync. Try again in a moment.");
+			}
+		},
+		[notify, saveBooksToCloud],
+	);
+
+	const syncNow = useCallback(() => {
+		if (!isLoaded) return;
+		if (!isSignedIn) {
+			notify("Sign in to sync your shelf");
+			return;
+		}
+
+		if (cloudSaveTimerRef.current) {
+			window.clearTimeout(cloudSaveTimerRef.current);
+			cloudSaveTimerRef.current = null;
+		}
+		loadCloudShelf({ notifyWhenDone: true });
+	}, [isLoaded, isSignedIn, loadCloudShelf, notify]);
 
 	useEffect(() => {
 		window.localStorage.setItem(storageKey, JSON.stringify(books));
+	}, [books]);
+
+	useEffect(() => {
+		booksRef.current = books;
 	}, [books]);
 
 	useEffect(() => {
@@ -150,6 +317,57 @@ export function LittleShelfApp() {
 			window.localStorage.removeItem(focusedReadingStorageKey);
 		}
 	}, [focusedReadingId]);
+
+	useEffect(() => {
+		if (!isLoaded) return;
+
+		if (!isSignedIn) {
+			hasLoadedCloudShelfRef.current = false;
+			lastKnownCloudUpdatedAtRef.current = null;
+			setCloudStatus("local");
+			setCloudMessage("Sign in to back up this shelf across devices.");
+			setLastSyncedAt(null);
+			if (cloudSaveTimerRef.current) {
+				window.clearTimeout(cloudSaveTimerRef.current);
+				cloudSaveTimerRef.current = null;
+			}
+			return;
+		}
+
+		let isCurrent = true;
+		loadCloudShelf({ isCurrent: () => isCurrent });
+
+		return () => {
+			isCurrent = false;
+		};
+	}, [isLoaded, isSignedIn, loadCloudShelf]);
+
+	useEffect(() => {
+		if (!isLoaded || !isSignedIn || !hasLoadedCloudShelfRef.current) return;
+		if (skipNextAutoSaveRef.current) {
+			skipNextAutoSaveRef.current = false;
+			return;
+		}
+
+		if (cloudSaveTimerRef.current) {
+			window.clearTimeout(cloudSaveTimerRef.current);
+		}
+
+		setCloudStatus("saving");
+		setCloudMessage("Saving your latest shelf changes...");
+		const saveVersion = cloudSaveVersionRef.current + 1;
+		cloudSaveVersionRef.current = saveVersion;
+		cloudSaveTimerRef.current = window.setTimeout(() => {
+			saveBooksToCloud(books, { saveVersion });
+		}, 800);
+
+		return () => {
+			if (cloudSaveTimerRef.current) {
+				window.clearTimeout(cloudSaveTimerRef.current);
+				cloudSaveTimerRef.current = null;
+			}
+		};
+	}, [books, isLoaded, isSignedIn, saveBooksToCloud]);
 
 	const readingBooks = sortReadingBooks(
 		books.filter((book) => book.status === "reading"),
@@ -173,14 +391,6 @@ export function LittleShelfApp() {
 	);
 	const pickedBook = picks[pickIndex % Math.max(picks.length, 1)];
 	const isEditing = editingId !== null;
-
-	function notify(message: string) {
-		setToast(message);
-		if (toastTimerRef.current) {
-			window.clearTimeout(toastTimerRef.current);
-		}
-		toastTimerRef.current = window.setTimeout(() => setToast(""), 2200);
-	}
 
 	function openAddBook(status: BookStatus = "want") {
 		setActiveTab("Shelf");
@@ -341,10 +551,18 @@ export function LittleShelfApp() {
 	}
 
 	const finishingBook = books.find((book) => book.id === finishingBookId);
+	const cloudSync: CloudSyncDetails = {
+		isLoaded,
+		isSignedIn: Boolean(isSignedIn),
+		status: cloudStatus,
+		message: cloudMessage,
+		lastSyncedAt,
+		onSyncNow: syncNow,
+	};
 
 	return (
 		<main className="mx-auto min-h-dvh w-full max-w-5xl px-4 pb-28 pt-5 text-ink sm:px-6 lg:pb-10">
-			<header className="mb-6 flex items-start justify-between gap-4">
+			<header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
 				<div>
 					<p className="mb-2 text-[0.68rem] font-bold uppercase tracking-[0.26em] text-sage">
 						Little Shelf
@@ -353,7 +571,8 @@ export function LittleShelfApp() {
 						Your quiet reading corner
 					</h1>
 				</div>
-				<div className="flex shrink-0 items-center gap-2">
+				<div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+					<AuthControls cloudStatus={cloudStatus} />
 					<ThemeChooser theme={theme} onTheme={setTheme} />
 					<button
 						aria-label="Open settings"
@@ -455,6 +674,7 @@ export function LittleShelfApp() {
 			{isSettingsOpen && (
 				<SettingsSheet
 					books={books}
+					cloudSync={cloudSync}
 					onClose={() => setIsSettingsOpen(false)}
 					onImport={replaceBooks}
 					onNotify={notify}
@@ -475,6 +695,63 @@ export function LittleShelfApp() {
 			<AppToast message={toast} />
 		</main>
 	);
+}
+
+function AuthControls({ cloudStatus }: { cloudStatus: CloudStatus }) {
+	return (
+		<div className="flex items-center gap-2">
+			<Show when="signed-out">
+				<SignInButton>
+					<button
+						className="tap rounded-full border border-[var(--theme-line)] bg-paper/70 px-3 py-2.5 text-sm font-bold text-sage shadow-soft"
+						type="button"
+					>
+						Sign in
+					</button>
+				</SignInButton>
+				<SignUpButton>
+					<button
+						className="tap rounded-full bg-ink px-3 py-2.5 text-sm font-bold text-paper shadow-soft"
+						type="button"
+					>
+						Sign up
+					</button>
+				</SignUpButton>
+			</Show>
+			<Show when="signed-in">
+				<span className="rounded-full border border-[var(--theme-line)] bg-paper/70 px-3 py-2 text-[0.68rem] font-bold uppercase tracking-[0.16em] text-muted shadow-soft">
+					{cloudStatusLabels[cloudStatus]}
+				</span>
+				<div className="rounded-full border border-[var(--theme-line)] bg-paper/70 p-1 shadow-soft">
+					<UserButton />
+				</div>
+			</Show>
+		</div>
+	);
+}
+
+function mergeShelves(localBooks: Book[], cloudBooks: Book[]) {
+	const booksById = new Map<string, Book>();
+
+	for (const book of cloudBooks) {
+		booksById.set(book.id, book);
+	}
+
+	for (const book of localBooks) {
+		booksById.set(book.id, book);
+	}
+
+	return Array.from(booksById.values()).sort((firstBook, secondBook) => {
+		return getBookTime(secondBook) - getBookTime(firstBook);
+	});
+}
+
+function areBooksEqual(firstBooks: Book[], secondBooks: Book[]) {
+	return JSON.stringify(firstBooks) === JSON.stringify(secondBooks);
+}
+
+function getBookTime(book: Book) {
+	return new Date(book.addedAt).getTime() || 0;
 }
 
 function NowScreen({
@@ -1091,11 +1368,13 @@ function MeowshroomNote() {
 
 function SettingsSheet({
 	books,
+	cloudSync,
 	onClose,
 	onImport,
 	onNotify,
 }: {
 	books: Book[];
+	cloudSync: CloudSyncDetails;
 	onClose: () => void;
 	onImport: (books: Book[]) => void;
 	onNotify: (message: string) => void;
@@ -1134,6 +1413,13 @@ function SettingsSheet({
 		);
 	}
 
+	const syncTone =
+		cloudSync.status === "synced"
+			? "text-sage"
+			: cloudSync.status === "conflict" || cloudSync.status === "error"
+				? "text-burgundy"
+				: "text-muted";
+
 	return (
 		<div className="fixed inset-0 z-30 flex items-end bg-ink/35 px-3 pt-12 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6">
 			<button
@@ -1162,8 +1448,8 @@ function SettingsSheet({
 							Back up your shelf
 						</h2>
 						<p className="mt-2 text-sm leading-6 text-muted">
-							Your books live on this device. Export a copy before clearing
-							browser data or moving phones.
+							Signed-in shelves sync to cloud. Export is still here as a simple
+							backup before clearing browser data or moving phones.
 						</p>
 					</div>
 					<button
@@ -1178,7 +1464,43 @@ function SettingsSheet({
 					</button>
 				</div>
 
-				<div className="mt-5 grid gap-3">
+				<div className="mt-5 rounded-[1.25rem] border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] p-4">
+					<div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						<div>
+							<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
+								Cloud sync
+							</p>
+							<p className={`mt-2 text-sm font-bold ${syncTone}`}>
+								{cloudStatusLabels[cloudSync.status]}
+							</p>
+							<p className="mt-1 text-xs leading-5 text-muted">
+								{cloudSync.message}
+							</p>
+							<p className="mt-2 text-xs font-bold text-muted">
+								{cloudSync.isSignedIn
+									? `Signed in. ${cloudSync.lastSyncedAt ? `Last checked ${formatShortDateTime(cloudSync.lastSyncedAt)}.` : "No completed sync yet."}`
+									: cloudSync.isLoaded
+										? "Signed out. This shelf is local on this device."
+										: "Checking sign-in state..."}
+							</p>
+						</div>
+						<button
+							className="tap rounded-full bg-sage px-4 py-2.5 text-sm font-bold text-paper disabled:cursor-not-allowed disabled:opacity-60"
+							disabled={
+								!cloudSync.isLoaded ||
+								!cloudSync.isSignedIn ||
+								cloudSync.status === "loading" ||
+								cloudSync.status === "saving"
+							}
+							onClick={cloudSync.onSyncNow}
+							type="button"
+						>
+							Sync now
+						</button>
+					</div>
+				</div>
+
+				<div className="mt-3 grid gap-3">
 					<button
 						className="tap rounded-[1.25rem] bg-burgundy px-5 py-3 text-left font-bold text-paper"
 						onClick={exportBackup}
@@ -2393,6 +2715,15 @@ function formatFinishedDate(date?: string) {
 		day: "numeric",
 		month: "short",
 		year: "numeric",
+	}).format(new Date(date));
+}
+
+function formatShortDateTime(date: string) {
+	return new Intl.DateTimeFormat("en", {
+		day: "numeric",
+		hour: "numeric",
+		minute: "2-digit",
+		month: "short",
 	}).format(new Date(date));
 }
 

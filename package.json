@@ -17,6 +17,8 @@
     "check": "biome check"
   },
   "dependencies": {
+    "@clerk/tanstack-react-start": "^1.4.9",
+    "@neondatabase/serverless": "^1.1.0",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
     "@tanstack/react-router": "latest",
