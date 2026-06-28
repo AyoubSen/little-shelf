@@ -14,6 +14,7 @@ import {
 	Search,
 	Settings,
 	Sparkles,
+	Star,
 	Trash2,
 } from "lucide-react";
 import {
@@ -78,6 +79,12 @@ type CloudSyncDetails = {
 	message: string;
 	lastSyncedAt: string | null;
 	onSyncNow: () => void;
+};
+
+type MigrationChoice = {
+	cloudBooks: Book[];
+	localBooks: Book[];
+	mergedBooks: Book[];
 };
 
 type BookDraft = {
@@ -172,6 +179,8 @@ export function LittleShelfApp() {
 		"Sign in to back up this shelf across devices.",
 	);
 	const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+	const [migrationChoice, setMigrationChoice] =
+		useState<MigrationChoice | null>(null);
 	const toastTimerRef = useRef<number | null>(null);
 	const booksRef = useRef<Book[]>(books);
 	const hasLoadedCloudShelfRef = useRef(false);
@@ -257,28 +266,38 @@ export function LittleShelfApp() {
 
 				lastKnownCloudUpdatedAtRef.current = result.updatedAt;
 				const cloudBooks = sortBooksByAddedAt(dedupeBooks(result.books));
-				const localBooks = booksRef.current;
+				const localBooks = sortBooksByAddedAt(dedupeBooks(booksRef.current));
 				const shouldUploadLocalBooks =
 					cloudBooks.length === 0 && localBooks.length > 0;
-				const nextBooks = shouldUploadLocalBooks
-					? sortBooksByAddedAt(dedupeBooks(localBooks))
-					: cloudBooks;
-				const localChanged = !areBooksEqual(localBooks, nextBooks);
-
-				if (localChanged) {
-					skipNextAutoSaveRef.current = true;
-					setBooks(nextBooks);
-				}
 
 				hasLoadedCloudShelfRef.current = true;
 
-				if (
-					shouldUploadLocalBooks ||
-					!areBooksEqual(result.books, cloudBooks)
-				) {
-					await saveBooksToCloud(nextBooks, { isCurrent });
+				if (shouldUploadLocalBooks) {
+					await saveBooksToCloud(localBooks, { isCurrent });
 					if (notifyWhenDone && isCurrent()) notify("Shelf synced");
 					return;
+				}
+
+				if (!areBooksEqual(result.books, cloudBooks)) {
+					await saveBooksToCloud(cloudBooks, { isCurrent });
+				}
+
+				if (!areBooksEqual(localBooks, cloudBooks)) {
+					setMigrationChoice({
+						cloudBooks,
+						localBooks,
+						mergedBooks: sortBooksByAddedAt(
+							dedupeBooks([...cloudBooks, ...localBooks]),
+						),
+					});
+					setCloudStatus("conflict");
+					setCloudMessage("Choose how to handle books saved on this device.");
+					return;
+				}
+
+				if (!areBooksEqual(booksRef.current, cloudBooks)) {
+					skipNextAutoSaveRef.current = true;
+					setBooks(cloudBooks);
 				}
 
 				setCloudStatus("synced");
@@ -416,7 +435,34 @@ export function LittleShelfApp() {
 		setIsBookSheetOpen(true);
 	}
 
+	function useCloudShelf() {
+		if (!migrationChoice) return;
+		skipNextAutoSaveRef.current = true;
+		setBooks(migrationChoice.cloudBooks);
+		setMigrationChoice(null);
+		setCloudStatus("synced");
+		setCloudMessage("Cloud backup is up to date.");
+		setLastSyncedAt(new Date().toISOString());
+		notify("Using cloud shelf");
+	}
+
+	async function mergeDeviceShelf() {
+		if (!migrationChoice) return;
+		const nextBooks = migrationChoice.mergedBooks;
+		setBooks(nextBooks);
+		setMigrationChoice(null);
+		await saveBooksToCloud(nextBooks);
+		notify("Device books merged");
+	}
+
+	function exportLocalShelf() {
+		if (!migrationChoice) return;
+		exportBooksBackup(migrationChoice.localBooks, "little-shelf-local-backup");
+		notify("Local backup exported");
+	}
+
 	function replaceBooks(nextBooks: Book[]) {
+		setMigrationChoice(null);
 		setBooks(nextBooks);
 		notify(
 			`Imported ${nextBooks.length} ${nextBooks.length === 1 ? "book" : "books"}`,
@@ -440,6 +486,7 @@ export function LittleShelfApp() {
 				: undefined;
 
 		if (editingId) {
+			setMigrationChoice(null);
 			setBooks((current) =>
 				current.map((book) =>
 					book.id === editingId
@@ -465,6 +512,7 @@ export function LittleShelfApp() {
 				),
 			);
 		} else {
+			setMigrationChoice(null);
 			setBooks((current) => [
 				{
 					id: crypto.randomUUID(),
@@ -504,6 +552,7 @@ export function LittleShelfApp() {
 
 		const id = crypto.randomUUID();
 
+		setMigrationChoice(null);
 		setBooks((current) => [
 			{
 				id,
@@ -709,6 +758,15 @@ export function LittleShelfApp() {
 				/>
 			)}
 
+			{migrationChoice && (
+				<ShelfMigrationSheet
+					choice={migrationChoice}
+					onExportLocal={exportLocalShelf}
+					onMerge={mergeDeviceShelf}
+					onUseCloud={useCloudShelf}
+				/>
+			)}
+
 			<AppToast message={toast} />
 		</main>
 	);
@@ -747,6 +805,72 @@ function AuthControls({ cloudStatus }: { cloudStatus: CloudStatus }) {
 	);
 }
 
+function ShelfMigrationSheet({
+	choice,
+	onExportLocal,
+	onMerge,
+	onUseCloud,
+}: {
+	choice: MigrationChoice;
+	onExportLocal: () => void;
+	onMerge: () => void;
+	onUseCloud: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-30 flex items-end bg-ink/35 px-3 pt-12 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6">
+			<section className="surface relative max-h-[88dvh] w-full overflow-y-auto rounded-t-[1.75rem] p-5 sm:max-w-xl sm:rounded-[1.75rem] sm:p-6">
+				<div className="mx-auto mb-4 h-1.5 w-12 rounded-full bg-ink/15 sm:hidden" />
+				<p className="text-xs font-bold uppercase tracking-[0.22em] text-sage">
+					Shelf sync
+				</p>
+				<h2 className="mt-1 font-serif text-3xl leading-none text-ink">
+					This device has different books.
+				</h2>
+				<p className="mt-3 text-sm leading-6 text-muted">
+					Your cloud shelf has {choice.cloudBooks.length}{" "}
+					{choice.cloudBooks.length === 1 ? "book" : "books"}. This device has{" "}
+					{choice.localBooks.length}. Choose what to keep before syncing.
+				</p>
+
+				<div className="mt-5 grid gap-3">
+					<button
+						className="tap rounded-[1.25rem] bg-sage px-5 py-3 text-left font-bold text-paper"
+						onClick={onUseCloud}
+						type="button"
+					>
+						Use cloud shelf
+						<span className="mt-1 block text-xs font-semibold text-paper/75">
+							Replace this device with the cloud copy.
+						</span>
+					</button>
+					<button
+						className="tap rounded-[1.25rem] bg-burgundy px-5 py-3 text-left font-bold text-paper"
+						onClick={onMerge}
+						type="button"
+					>
+						Merge this device
+						<span className="mt-1 block text-xs font-semibold text-paper/75">
+							Save {choice.mergedBooks.length}{" "}
+							{choice.mergedBooks.length === 1 ? "book" : "books"} to cloud
+							after removing duplicates.
+						</span>
+					</button>
+					<button
+						className="tap rounded-[1.25rem] border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] px-5 py-3 text-left font-bold text-ink"
+						onClick={onExportLocal}
+						type="button"
+					>
+						Export local backup
+						<span className="mt-1 block text-xs font-semibold text-muted">
+							Download this device's books before choosing.
+						</span>
+					</button>
+				</div>
+			</section>
+		</div>
+	);
+}
+
 function areBooksEqual(firstBooks: Book[], secondBooks: Book[]) {
 	return JSON.stringify(firstBooks) === JSON.stringify(secondBooks);
 }
@@ -755,6 +879,62 @@ function sortBooksByAddedAt(books: Book[]) {
 	return [...books].sort((firstBook, secondBook) => {
 		return getBookTime(secondBook) - getBookTime(firstBook);
 	});
+}
+
+function exportBooksBackup(books: Book[], filePrefix = "little-shelf-backup") {
+	const backup = serializeShelfBackup(books);
+	const blob = new Blob([backup], { type: "application/json" });
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = `${filePrefix}-${new Date().toISOString().slice(0, 10)}.json`;
+	link.click();
+	URL.revokeObjectURL(url);
+}
+
+function RatingControl({
+	rating,
+	onRate,
+}: {
+	rating?: number;
+	onRate: (rating?: number) => void;
+}) {
+	return (
+		<div className="mt-2 flex flex-wrap items-center gap-2">
+			<div className="flex rounded-full border border-[var(--theme-line)] bg-[var(--theme-surface-muted)] p-1">
+				{[1, 2, 3, 4, 5].map((value) => {
+					const isActive = Boolean(rating && value <= rating);
+					return (
+						<button
+							aria-label={`Rate ${value} out of 5`}
+							aria-pressed={rating === value}
+							className={`tap rating-star ${isActive ? "rating-star-on" : ""}`}
+							key={value}
+							onClick={() => onRate(rating === value ? undefined : value)}
+							type="button"
+						>
+							<Star
+								className="size-4"
+								fill={isActive ? "currentColor" : "none"}
+							/>
+						</button>
+					);
+				})}
+			</div>
+			<span className="text-xs font-bold text-muted">
+				{rating ? `${rating}/5` : "No rating"}
+			</span>
+		</div>
+	);
+}
+
+function RatingPill({ rating }: { rating: number }) {
+	return (
+		<span className="inline-flex items-center gap-1 rounded-full bg-[var(--theme-strong-soft)] px-2.5 py-1 text-[0.68rem] font-bold text-burgundy">
+			<Star className="size-3" fill="currentColor" />
+			{rating}/5
+		</span>
+	);
 }
 
 function getBookTime(book: Book) {
@@ -1393,14 +1573,7 @@ function SettingsSheet({
 	});
 
 	function exportBackup() {
-		const backup = serializeShelfBackup(books);
-		const blob = new Blob([backup], { type: "application/json" });
-		const url = URL.createObjectURL(blob);
-		const link = document.createElement("a");
-		link.href = url;
-		link.download = `little-shelf-backup-${new Date().toISOString().slice(0, 10)}.json`;
-		link.click();
-		URL.revokeObjectURL(url);
+		exportBooksBackup(books);
 		onNotify("Backup exported");
 	}
 
@@ -1655,13 +1828,17 @@ function BookSheet({
 				? String(result.pageCount)
 				: currentDraft.totalPages,
 		}));
-		requestAnimationFrame(() => {
-			detailsRef.current?.scrollIntoView({
+		window.setTimeout(() => {
+			const dialog = dialogRef.current;
+			const details = detailsRef.current;
+			if (!dialog || !details) return;
+
+			dialog.scrollTo({
 				behavior: "smooth",
-				block: "start",
+				top: details.offsetTop - 12,
 			});
 			titleInputRef.current?.focus({ preventScroll: true });
-		});
+		}, 80);
 
 		if (result.pageCount) {
 			pageLookupKeyRef.current = null;
@@ -2379,6 +2556,7 @@ function JournalScreen({
 									<span className="rounded-full bg-[var(--theme-accent-soft)] px-2.5 py-1 text-[0.68rem] font-bold text-sage">
 										{finishedDate}
 									</span>
+									{book.rating ? <RatingPill rating={book.rating} /> : null}
 								</div>
 								<h3 className="mt-2 font-serif text-3xl leading-none text-ink">
 									{book.title}
@@ -2398,6 +2576,13 @@ function JournalScreen({
 
 						{isEditing ? (
 							<div className="grid gap-3 border-t border-[var(--theme-line)] p-5 pl-7">
+								<div>
+									<p className="text-sm font-bold text-ink">Private rating</p>
+									<RatingControl
+										rating={book.rating}
+										onRate={(rating) => onUpdate(book.id, { rating })}
+									/>
+								</div>
 								<label className="text-sm font-bold text-ink">
 									How did this book make you feel?
 									<textarea
@@ -2501,6 +2686,9 @@ function JournalScreen({
 								)}
 								<div className="flex flex-wrap gap-2">
 									<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-2 text-xs font-bold text-sage">
+										{book.rating ? `${book.rating}/5 remembered` : "No rating"}
+									</span>
+									<span className="rounded-full bg-[var(--theme-accent-soft)] px-3 py-2 text-xs font-bold text-sage">
 										{hasGiveTo
 											? `Give to ${reflection.giveTo}`
 											: "No person named"}
@@ -2542,6 +2730,10 @@ function FinishReflectionSheet({
 		});
 	}
 
+	function updateRating(rating?: number) {
+		onUpdate(book.id, { rating });
+	}
+
 	return (
 		<div className="fixed inset-0 z-30 flex items-end bg-ink/35 px-3 pt-12 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6">
 			<button
@@ -2576,6 +2768,13 @@ function FinishReflectionSheet({
 				</div>
 
 				<div className="mt-5 grid gap-3">
+					<div>
+						<p className="text-sm font-bold text-ink">A tiny rating</p>
+						<p className="mt-1 text-xs leading-5 text-muted">
+							Private, optional, and allowed to be emotional instead of precise.
+						</p>
+						<RatingControl rating={book.rating} onRate={updateRating} />
+					</div>
 					<label className="text-sm font-bold text-ink">
 						How did this book make you feel?
 						<textarea

@@ -165,8 +165,8 @@ function normalizeReflection(value: unknown): Book["reflection"] {
 
 function normalizeRating(value: unknown) {
 	const rating = typeof value === "number" ? value : Number(value);
-	if (!Number.isFinite(rating) || rating < 0) return undefined;
-	return rating;
+	if (!Number.isFinite(rating) || rating < 1) return undefined;
+	return Math.min(Math.round(rating), 5);
 }
 
 function normalizeDate(value: unknown) {
