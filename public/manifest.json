@@ -1,7 +1,7 @@
 {
   "id": "/",
   "short_name": "Shelf",
-  "name": "Little Shelf",
+  "name": "Little Shelfy",
   "description": "A private reading diary and mood-based book picker.",
   "categories": ["books", "lifestyle", "productivity"],
   "icons": [

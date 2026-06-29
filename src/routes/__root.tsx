@@ -16,11 +16,11 @@ export const Route = createRootRoute({
 				content: "width=device-width, initial-scale=1",
 			},
 			{
-				title: "Little Shelf",
+				title: "Little Shelfy",
 			},
 			{
 				name: "application-name",
-				content: "Little Shelf",
+				content: "Little Shelfy",
 			},
 			{
 				name: "description",
@@ -36,7 +36,7 @@ export const Route = createRootRoute({
 			},
 			{
 				name: "apple-mobile-web-app-title",
-				content: "Little Shelf",
+				content: "Little Shelfy",
 			},
 			{
 				name: "apple-mobile-web-app-status-bar-style",
@@ -48,7 +48,7 @@ export const Route = createRootRoute({
 			},
 			{
 				property: "og:title",
-				content: "Little Shelf",
+				content: "Little Shelfy",
 			},
 			{
 				property: "og:description",
