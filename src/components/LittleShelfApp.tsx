@@ -158,7 +158,7 @@ const blankDraft: BookDraft = {
 export function LittleShelfApp() {
 	const { isLoaded, isSignedIn } = useUser();
 	const [books, setBooks] = useState<Book[]>(() => loadBooks());
-	const [activeTab, setActiveTab] = useState<Tab>("Now");
+	const [activeTab, setActiveTab] = useState<Tab>("Shelf");
 	const [draft, setDraft] = useState<BookDraft>(blankDraft);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [isBookSheetOpen, setIsBookSheetOpen] = useState(false);
